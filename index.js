@@ -670,6 +670,30 @@ app.get('/health', (req, res) => {
 });
 app.get('/webhook', (req, res) => res.status(200).json({ status: 'ok' }));
 
+// Diagnóstico de produção: confere expediente, Redis e a config do Google Calendar
+// (presença das variáveis + teste real de auth/freebusy). Não expõe segredos.
+app.get('/diag', async (req, res) => {
+    const cfg = cal.diag();
+    let calendarLive = null;
+    if (cfg.configurado) {
+        try {
+            const s = await cal.horariosLivres({ dias: 5, max: 1 });
+            calendarLive = { ok: true, slotsEncontrados: s.length, exemplo: s[0]?.label || null };
+        } catch (e) {
+            calendarLive = { ok: false, erro: e.message };
+        }
+    }
+    res.json({
+        ok: true,
+        expediente: estaEmExpediente(),
+        redis: store.isRedis(),
+        pushConfigurado: !!CC_PUSH_URL,
+        equipeNumero: !!EQUIPE_NUMERO,
+        calendar: cfg,
+        calendarLive
+    });
+});
+
 // Histórico de leads qualificados (útil pra conferência rápida)
 app.get('/leads', async (req, res) => {
     try {

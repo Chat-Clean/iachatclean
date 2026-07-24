@@ -141,4 +141,17 @@ async function cancelarReuniao({ eventId, calendarId }) {
     return true;
 }
 
-module.exports = { configurado, horariosLivres, agendarReuniao, cancelarReuniao, rotuloSlot, DURACAO_MIN, TZ };
+// Diagnóstico da config (sem expor valores/segredos) — usado pelo /diag.
+function diag() {
+    return {
+        configurado: configurado(),
+        clientId: !!CLIENT_ID,
+        clientSecret: !!CLIENT_SECRET,
+        refreshToken: !!REFRESH_TOKEN,
+        teamCalendarsCount: TEAM_CALENDARS.length,
+        bookingCalendarSet: !!process.env.GOOGLE_BOOKING_CALENDAR,
+        duracaoMin: DURACAO_MIN
+    };
+}
+
+module.exports = { configurado, horariosLivres, agendarReuniao, cancelarReuniao, rotuloSlot, diag, DURACAO_MIN, TZ };
