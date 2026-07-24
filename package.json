@@ -1,0 +1,37 @@
+{
+  "name": "iachatclean",
+  "version": "1.0.0",
+  "description": "SDR Virtual ChatClean — IA externa de captação e qualificação de leads (Webhook + Push API ChatClean)",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "chat": "node test-chat.js",
+    "sim": "node sim-lead.js",
+    "gauth": "node google-auth.js",
+    "cal:slots": "node cal-slots.js"
+  },
+  "keywords": [
+    "whatsapp",
+    "webhook",
+    "chatclean",
+    "ia",
+    "sdr",
+    "crm",
+    "openai"
+  ],
+  "author": "ChatClean",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.6.2",
+    "dotenv": "^16.3.1",
+    "express": "^4.22.1",
+    "form-data": "^4.0.5",
+    "googleapis": "^173.0.0",
+    "ioredis": "^5.11.1",
+    "openai": "^4.104.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}
