@@ -249,6 +249,35 @@ async function gerarRespostaIA(leadData, mensagemCliente, proximoCampo, historic
     return completion.choices[0].message.content.trim();
 }
 
+// A IA "enxerga" a imagem enviada pelo cliente (gpt-4o com visão) e descreve
+// o conteúdo para usar no atendimento. Retorna null se falhar.
+async function analisarImagem(mediaUrl) {
+    if (!mediaUrl) return null;
+    try {
+        const instrucao = `Você é atendente SDR da ChatClean (plataforma de CRM e atendimento digital). O cliente enviou esta imagem no WhatsApp durante o atendimento. Descreva de forma curta e útil (1 a 3 frases, tom natural, SEM markdown) o que é e o que há de relevante para entender a necessidade dele:
+- Se for um PRINT de conversa/atendimento, resuma o que dá pra entender (do que se trata: reclamação, dúvida, volume de mensagens, atendimento demorado etc.).
+- Se for uma tela de sistema/site, diga o que aparenta ser.
+- Se for logo, foto da empresa, produto ou documento, diga o que é.
+Não invente o que não dá pra ver.`;
+        const completion = await openai.chat.completions.create({
+            model: 'gpt-4o',
+            messages: [{
+                role: 'user',
+                content: [
+                    { type: 'text', text: instrucao },
+                    { type: 'image_url', image_url: { url: mediaUrl } }
+                ]
+            }],
+            max_tokens: 300,
+            temperature: 0.3
+        });
+        return completion.choices[0].message.content.trim();
+    } catch (e) {
+        console.error('❌ Erro ao analisar imagem (visão):', e.message);
+        return null;
+    }
+}
+
 // Resposta quando o lead JÁ foi encaminhado ao especialista: tira dúvidas
 // pontuais de forma natural, sem refazer a qualificação nem repetir o resumo.
 async function gerarRespostaPosEncaminhamento(leadData, mensagemCliente, historicoRecente = []) {
@@ -410,16 +439,59 @@ async function processarMensagem({ chatId, texto, tipo, mediaBase64, mediaUrl, m
             return;
         }
 
-        // Imagem / documento → acuse o recebimento de forma humanizada e siga o fluxo
-        // (o SDR não "enxerga" a imagem; ela vira contexto pro especialista).
-        if (tipo === 'image' || tipo === 'document') {
-            const ack = tipo === 'image'
-                ? 'Recebi sua imagem! Não consigo abrir por aqui, mas deixo registrada pro especialista ver junto com você 😊'
-                : 'Recebi o arquivo! Vou encaminhar pro nosso especialista junto com o seu atendimento 😊';
+        // Imagem → a IA ENXERGA (visão gpt-4o) e usa o conteúdo na resposta.
+        if (tipo === 'image') {
+            const desc = await analisarImagem(mediaUrl);
+            if (desc) {
+                leadData.analiseImagem = desc; // consumido na geração da resposta
+                console.log(`🖼️ Visão: ${desc}`);
+                leadData.conversationHistory.push({ role: 'user', content: `[O cliente enviou uma imagem] — ${desc}` });
+            } else {
+                leadData.conversationHistory.push({ role: 'user', content: '[O cliente enviou uma imagem]' });
+            }
+            texto = 'Enviei uma imagem.';
+        }
+
+        // Documento (PDF/planilha/arquivo) → registra p/ o especialista (não é imagem).
+        if (tipo === 'document') {
+            const ack = 'Recebi o arquivo! Vou deixar registrado pro nosso especialista analisar junto com você 😊';
             await enviarMensagem(chatId, ack);
-            leadData.conversationHistory.push({ role: 'user', content: '[O cliente enviou ' + (tipo === 'image' ? 'uma imagem' : 'um documento') + ']' });
+            leadData.conversationHistory.push({ role: 'user', content: '[O cliente enviou um documento]' });
             leadData.conversationHistory.push({ role: 'assistant', content: ack });
             texto = 'Enviei um arquivo.';
+        }
+
+        // Vídeo → transcreve o áudio do vídeo (Whisper aceita mp4) p/ entender o que é falado.
+        if (tipo === 'video') {
+            let videoBuffer = null;
+            try {
+                if (mediaBase64) videoBuffer = Buffer.from(mediaBase64, 'base64');
+                else if (mediaUrl) {
+                    const resp = await axios.get(mediaUrl, { responseType: 'arraybuffer', timeout: 60000 });
+                    videoBuffer = Buffer.from(resp.data);
+                }
+            } catch (e) { console.error('❌ Erro ao baixar vídeo:', e.message); }
+
+            let fala = '';
+            if (videoBuffer) {
+                try {
+                    const formData = new FormData();
+                    formData.append('file', videoBuffer, { filename: 'video.mp4', contentType: mediaMimetype || 'video/mp4' });
+                    formData.append('model', 'whisper-1');
+                    const tr = await axios.post('https://api.openai.com/v1/audio/transcriptions', formData, {
+                        headers: { ...formData.getHeaders(), Authorization: `Bearer ${process.env.OPENAI_API_KEY}` }
+                    });
+                    fala = (tr.data.text || '').trim();
+                } catch (e) { console.error('❌ Erro ao transcrever vídeo:', e.message); }
+            }
+            if (fala) {
+                console.log(`🎬 Vídeo transcrito: "${fala}"`);
+                leadData.conversationHistory.push({ role: 'user', content: `[O cliente enviou um vídeo] Fala no vídeo: ${fala}` });
+                texto = fala;
+            } else {
+                leadData.conversationHistory.push({ role: 'user', content: '[O cliente enviou um vídeo]' });
+                texto = 'Enviei um vídeo.';
+            }
         }
 
         // Áudio → transcrição (Whisper). Se falhar, pede texto.
@@ -518,6 +590,7 @@ async function processarMensagem({ chatId, texto, tipo, mediaBase64, mediaUrl, m
 
         leadData.objecaoAtiva = null;    // consumidos
         leadData.perguntouAgora = null;
+        leadData.analiseImagem = null;
 
         await enviarMensagensQuebradas(chatId, resposta);
         leadData.conversationHistory.push({ role: 'user', content: texto });
@@ -619,7 +692,7 @@ function parsePayload(body) {
 }
 
 const mensagensProcessadas = new Set(); // dedup de webhooks
-const TIPOS_SUPORTADOS = ['text', 'image', 'document', 'audio', 'ptt'];
+const TIPOS_SUPORTADOS = ['text', 'image', 'document', 'audio', 'ptt', 'video'];
 
 app.post('/webhook', express.json({ limit: '10mb' }), async (req, res) => {
     res.status(200).json({ status: 'ok' }); // responde rápido (evita retry do ChatClean)

@@ -162,6 +162,7 @@ function promptResposta({ isInicioConversa, mensagemSanitizada, proximoCampo, le
 
     return `CONTEXTO DESTA MENSAGEM (estado atual do atendimento — não é regra, é só o que já sabemos):
 - O cliente acabou de dizer: "${mensagemSanitizada}"
+${leadData.analiseImagem ? '- O cliente ENVIOU UMA IMAGEM e você CONSEGUIU vê-la. Conteúdo: ' + leadData.analiseImagem + '\n  Comente de forma natural e útil o que viu (ex.: se for um print de conversa, reconheça do que se trata) e siga ajudando/qualificando. NUNCA diga que não consegue ver ou abrir imagens.' : ''}
 ${isInicioConversa ? '- Esta é a PRIMEIRA mensagem: acolha (passo 1) e pergunte como pode ajudar. Uma coisa de cada vez.' : ''}
 ${perguntou
     ? '- O CLIENTE FEZ UMA PERGUNTA. Responda a dúvida dele de forma completa e natural, usando o conhecimento do sistema (API oficial, Instagram, integrações, suporte etc.). NESTA resposta, NÃO faça a próxima pergunta do fluxo e NÃO repita perguntas que você já fez — deixe a conversa fluir e retome a qualificação quando ele terminar de perguntar.'
