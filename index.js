@@ -27,6 +27,8 @@ const WEBHOOK_SECRET  = process.env.WEBHOOK_SECRET || '';
 const EQUIPE_NUMERO  = process.env.EQUIPE_NUMERO  || '';
 const IA_ALLOWED_CONTACTS = (process.env.IA_ALLOWED_CONTACTS || '').split(',').map(s => s.trim()).filter(Boolean);
 const PORT           = process.env.PORT           || 3000;
+// Reinicia o atendimento após N horas sem interação do cliente (padrão: 24h).
+const RESET_INATIVIDADE = parseInt(process.env.RESET_INATIVIDADE_HORAS || '24', 10) * 3600 * 1000;
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -376,8 +378,16 @@ async function processarMensagem({ chatId, texto, tipo, mediaBase64, mediaUrl, m
     let leadData = null;
     try {
         leadData = await store.getLead(chatId);
+        // Reset automático por inatividade: se passou do limite (padrão 24h) sem
+        // interação, descarta o atendimento antigo e começa um novo do zero.
+        if (leadData && leadData.ultimaInteracao && (Date.now() - leadData.ultimaInteracao) > RESET_INATIVIDADE) {
+            console.log(`🕛 ${chatId}: inativo há mais de ${(RESET_INATIVIDADE / 3600000).toFixed(0)}h — reiniciando atendimento.`);
+            await store.deleteLead(chatId);
+            leadData = null;
+        }
         if (!leadData) leadData = { conversationHistory: [] };
         if (nomeContato && !leadData.nome) leadData.nome = nomeContato;
+        leadData.ultimaInteracao = Date.now(); // marca esta interação
         leadData.followUpDueAt = null; // nova mensagem cancela reativação pendente
 
         // Reset
@@ -686,6 +696,7 @@ app.get('/diag', async (req, res) => {
     res.json({
         ok: true,
         expediente: estaEmExpediente(),
+        resetInatividadeHoras: RESET_INATIVIDADE / 3600000,
         redis: store.isRedis(),
         pushConfigurado: !!CC_PUSH_URL,
         equipeNumero: !!EQUIPE_NUMERO,
