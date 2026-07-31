@@ -27,6 +27,13 @@ const WEBHOOK_SECRET  = process.env.WEBHOOK_SECRET || '';
 const EQUIPE_NUMERO  = process.env.EQUIPE_NUMERO  || '';
 const IA_ALLOWED_CONTACTS = (process.env.IA_ALLOWED_CONTACTS || '').split(',').map(s => s.trim()).filter(Boolean);
 const PORT           = process.env.PORT           || 3000;
+// Chave para proteger os endpoints administrativos (/leads, /diag), que expõem
+// dados de leads e config. Sem ela, esses endpoints ficam BLOQUEADOS (não abertos).
+const ADMIN_KEY      = process.env.ADMIN_KEY      || '';
+// Janela (ms) para AGRUPAR mensagens rápidas do mesmo cliente antes de responder.
+// No WhatsApp o cliente costuma mandar várias mensagens seguidas; juntamos tudo
+// num único turno em vez de responder só a primeira e ignorar o resto.
+const AGRUPAR_MS     = parseInt(process.env.AGRUPAR_MENSAGENS_MS || '2000', 10);
 // Reinicia o atendimento após N horas sem interação do cliente (padrão: 24h).
 const RESET_INATIVIDADE = parseInt(process.env.RESET_INATIVIDADE_HORAS || '24', 10) * 3600 * 1000;
 
@@ -586,7 +593,18 @@ async function processarMensagem({ chatId, texto, tipo, mediaBase64, mediaUrl, m
         const respHist = leadData.conversationHistory.slice(-10).map(h => ({
             role: h.role === 'user' ? 'user' : 'assistant', content: h.content
         }));
-        const resposta = await gerarRespostaIA(leadData, texto, proximoCampoDepois, respHist, exp);
+        let resposta;
+        try {
+            resposta = await gerarRespostaIA(leadData, texto, proximoCampoDepois, respHist, exp);
+        } catch (e) {
+            // Instabilidade na OpenAI: NÃO deixar o cliente sem resposta. Manda um
+            // fallback caloroso e encerra o turno (o que já foi extraído fica salvo;
+            // a próxima mensagem retoma a qualificação de onde parou).
+            console.error(`❌ Erro ao gerar resposta IA para ${chatId}:`, e.message);
+            await enviarMensagem(chatId, 'Opa, tive uma instabilidade rapidinha por aqui 😅 Pode me mandar de novo o que você disse?');
+            leadData.conversationHistory.push({ role: 'user', content: texto });
+            return;
+        }
 
         leadData.objecaoAtiva = null;    // consumidos
         leadData.perguntouAgora = null;
@@ -622,6 +640,80 @@ async function processarMensagem({ chatId, texto, tipo, mediaBase64, mediaUrl, m
             catch (e) { console.error('❌ Erro ao salvar estado da conversa:', e.message); }
         }
     }
+}
+
+// =============================================================
+//  FILA SERIAL POR CLIENTE + AGRUPAMENTO DE MENSAGENS RÁPIDAS
+//  No WhatsApp o cliente manda várias mensagens seguidas. Em vez de
+//  processar a primeira e DESCARTAR as demais (o lock antigo fazia isso),
+//  enfileiramos tudo por número e processamos em série. Mensagens de TEXTO
+//  em sequência são agrupadas num só turno (debounce AGRUPAR_MS); mídia é
+//  processada assim que chega (mas ainda em série, nunca descartada).
+// =============================================================
+const filaPorChat   = new Map(); // chatId -> [parsed, ...] aguardando processamento
+const debounceTimers = new Map(); // chatId -> timer de agrupamento de texto
+
+function enfileirar(parsed) {
+    const { chatId } = parsed;
+    const fila = filaPorChat.get(chatId) || [];
+    fila.push(parsed);
+    filaPorChat.set(chatId, fila);
+
+    if (parsed.tipo === 'text') {
+        // Espera um instante juntando mensagens rápidas antes de drenar.
+        if (debounceTimers.has(chatId)) clearTimeout(debounceTimers.get(chatId));
+        debounceTimers.set(chatId, setTimeout(() => {
+            debounceTimers.delete(chatId);
+            drenarFila(chatId);
+        }, AGRUPAR_MS));
+    } else {
+        // Mídia não espera: cancela o debounce pendente e drena já.
+        if (debounceTimers.has(chatId)) { clearTimeout(debounceTimers.get(chatId)); debounceTimers.delete(chatId); }
+        drenarFila(chatId);
+    }
+}
+
+// Junta as mensagens de TEXTO consecutivas no início da fila num único "turno".
+// Mídia é sempre uma unidade isolada (não dá pra concatenar imagem+áudio+texto).
+function proximaUnidade(fila) {
+    if (fila[0].tipo !== 'text') return fila.shift();
+    const textos = [], ids = [];
+    let nome = '', quoted = null;
+    while (fila.length && fila[0].tipo === 'text') {
+        const m = fila.shift();
+        if (m.texto) textos.push(m.texto);
+        if (m.msgId) ids.push(m.msgId);
+        if (!nome && m.nomeContato) nome = m.nomeContato;
+        if (!quoted && m.quotedText) quoted = m.quotedText;
+    }
+    return {
+        chatId: null, // preenchido pelo chamador
+        tipo: 'text',
+        texto: textos.join('\n'),
+        msgId: ids.join(',') || null,
+        nomeContato: nome,
+        quotedText: quoted,
+        mediaBase64: null, mediaUrl: null, mediaMimetype: null
+    };
+}
+
+async function drenarFila(chatId) {
+    if (processandoMensagem.get(chatId)) return; // já rodando: será drenado ao terminar
+    const fila = filaPorChat.get(chatId);
+    if (!fila || !fila.length) return;
+
+    const unidade = proximaUnidade(fila);
+    unidade.chatId = chatId;
+    try {
+        await processarMensagem(unidade);
+    } catch (e) {
+        console.error(`❌ Erro ao drenar fila de ${chatId}:`, e.message);
+    }
+
+    // Limpa a fila vazia; se algo chegou durante o processamento, drena de novo.
+    const restante = filaPorChat.get(chatId);
+    if (restante && restante.length) drenarFila(chatId);
+    else filaPorChat.delete(chatId);
 }
 
 // =============================================================
@@ -737,12 +829,8 @@ app.post('/webhook', express.json({ limit: '10mb' }), async (req, res) => {
             return;
         }
 
-        if (processandoMensagem.get(parsed.chatId)) {
-            console.log(`⏳ Já processando ${parsed.chatId} — ignorando concorrente`);
-            return;
-        }
-
-        setImmediate(() => processarMensagem(parsed));
+        // Enfileira (nunca descarta): agrupa mensagens rápidas e processa em série.
+        enfileirar(parsed);
     } catch (e) {
         console.error('❌ Erro no handler do webhook:', e);
     }
@@ -753,9 +841,27 @@ app.get('/health', (req, res) => {
 });
 app.get('/webhook', (req, res) => res.status(200).json({ status: 'ok' }));
 
+// Guard dos endpoints administrativos. Aceita a chave em ?key=, no header
+// x-admin-key ou Authorization: Bearer. Sem ADMIN_KEY configurada, BLOQUEIA
+// (nunca deixa /leads e /diag abertos ao público por omissão).
+function checarAdmin(req, res) {
+    if (!ADMIN_KEY) {
+        res.status(503).json({ erro: 'ADMIN_KEY não configurada no servidor' });
+        return false;
+    }
+    const raw = req.query.key || req.headers['x-admin-key'] || req.headers['authorization'] || '';
+    const key = String(raw).replace(/^Bearer\s+/i, '');
+    if (key !== ADMIN_KEY) {
+        res.status(401).json({ erro: 'não autorizado' });
+        return false;
+    }
+    return true;
+}
+
 // Diagnóstico de produção: confere expediente, Redis e a config do Google Calendar
 // (presença das variáveis + teste real de auth/freebusy). Não expõe segredos.
 app.get('/diag', async (req, res) => {
+    if (!checarAdmin(req, res)) return;
     const cfg = cal.diag();
     let calendarLive = null;
     if (cfg.configurado) {
@@ -780,6 +886,7 @@ app.get('/diag', async (req, res) => {
 
 // Histórico de leads qualificados (útil pra conferência rápida)
 app.get('/leads', async (req, res) => {
+    if (!checarAdmin(req, res)) return;
     try {
         const ids = await store.scanLeadIds();
         const ativos = [];
@@ -806,6 +913,7 @@ app.listen(PORT, () => {
     console.log('');
     if (!CC_PUSH_URL)   console.warn('⚠️  CC_PUSH_URL não configurado — a IA não conseguirá responder.');
     if (!EQUIPE_NUMERO) console.warn('ℹ️  EQUIPE_NUMERO não configurado — resumo de lead só irá como nota interna.');
+    if (!ADMIN_KEY)     console.warn('🔒 ADMIN_KEY não configurada — /leads e /diag ficarão BLOQUEADOS (503). Defina para liberar o acesso administrativo.');
     if (!process.env.OPENAI_API_KEY) { console.error('❌ OPENAI_API_KEY não configurada no .env!'); process.exit(1); }
     console.log(store.isRedis()
         ? '🗄️  Estado das conversas: Redis (persistente)'
