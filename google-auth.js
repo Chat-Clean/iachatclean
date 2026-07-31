@@ -13,7 +13,24 @@
 
 require('dotenv').config();
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 const { google } = require('googleapis');
+
+// Grava/atualiza GOOGLE_REFRESH_TOKEN direto no .env (substitui a linha se já
+// existir, senão adiciona). Evita cópia manual e exposição do token na tela.
+function salvarRefreshToken(token) {
+    const envPath = path.join(__dirname, '.env');
+    let conteudo = '';
+    try { conteudo = fs.readFileSync(envPath, 'utf8'); } catch (_) {}
+    const linha = `GOOGLE_REFRESH_TOKEN=${token}`;
+    if (/^GOOGLE_REFRESH_TOKEN=.*$/m.test(conteudo)) {
+        conteudo = conteudo.replace(/^GOOGLE_REFRESH_TOKEN=.*$/m, linha);
+    } else {
+        conteudo += (conteudo.endsWith('\n') || !conteudo ? '' : '\n') + linha + '\n';
+    }
+    fs.writeFileSync(envPath, conteudo);
+}
 
 const PORT = 5599;
 const REDIRECT = `http://localhost:${PORT}/oauth2callback`;
@@ -41,11 +58,15 @@ const server = http.createServer(async (req, res) => {
         const { tokens } = await oauth2.getToken(code);
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end('<h2>Pronto! Pode fechar esta aba e voltar ao terminal.</h2>');
-        console.log('\n✅ Autorizado. Copie a linha abaixo para o seu .env:\n');
         if (tokens.refresh_token) {
-            console.log(`GOOGLE_REFRESH_TOKEN=${tokens.refresh_token}\n`);
+            salvarRefreshToken(tokens.refresh_token);
+            const t = tokens.refresh_token;
+            const mascara = t.length > 12 ? `${t.slice(0, 6)}…${t.slice(-4)}` : '••••';
+            console.log('\n✅ Autorizado. GOOGLE_REFRESH_TOKEN gravado no .env local.');
+            console.log(`   Token (mascarado): ${mascara}  [${t.length} chars]`);
+            console.log('   ➡️ Copie o valor pro Easypanel (var GOOGLE_REFRESH_TOKEN) e salve pra reiniciar.\n');
         } else {
-            console.log('⚠️ Não veio refresh_token. Revogue o acesso do app em https://myaccount.google.com/permissions e rode de novo.\n');
+            console.log('\n⚠️ Não veio refresh_token. Revogue o acesso do app em https://myaccount.google.com/permissions e rode de novo (o app precisa estar publicado/consent forçado).\n');
         }
     } catch (e) {
         res.writeHead(500); res.end('Erro: ' + e.message);
