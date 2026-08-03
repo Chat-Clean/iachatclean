@@ -929,7 +929,12 @@ app.post('/webhook/:token', express.json({ limit: '10mb' }), handleWebhook);
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', uptime: process.uptime(), timestamp: new Date().toISOString() });
 });
-app.get('/webhook', (req, res) => res.status(200).json({ status: 'ok' }));
+// GET de validação do webhook (alguns painéis testam a URL com GET antes de
+// disparar). Responde 200 tanto em /webhook quanto em /webhook/<token>, senão
+// a URL com o token no caminho daria 404 e o provedor não dispararia.
+const webhookPing = (req, res) => res.status(200).json({ status: 'ok' });
+app.get('/webhook', webhookPing);
+app.get('/webhook/:token', webhookPing);
 
 // Guard dos endpoints administrativos. Aceita a chave em ?key=, no header
 // x-admin-key ou Authorization: Bearer. Sem ADMIN_KEY configurada, BLOQUEIA
