@@ -792,7 +792,10 @@ function parsePayload(body) {
             if (msg.fromMe) return null; // ignora eco do próprio bot/atendente
             if (IGNORAR_GRUPOS && ehGrupo(body, msg)) { console.log('👥 Mensagem de grupo ignorada'); return null; }
             const senderAlt = msg.raw?.Info?.SenderAlt ? String(msg.raw.Info.SenderAlt).split('@')[0] : null;
-            const numero = contato.number || contato.phone || body.number || senderAlt || msg.number;
+            // WABA (WhatsApp Oficial): o número do remetente vem em message.raw.from
+            // (não existe raw.Info.SenderAlt como no WhatsApp Web/whatsmeow).
+            const wabaFrom = msg.raw?.from || null;
+            const numero = contato.number || contato.phone || body.number || senderAlt || wabaFrom || msg.number;
             const phone  = normalizarPhone(numero);
             if (!phone) return null;
             return {
