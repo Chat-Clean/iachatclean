@@ -32,8 +32,29 @@ if (REDIS_URL) {
 
 const leadKey      = (chatId) => `${PREFIX}:lead:${chatId}`;
 const leadsListKey = `${PREFIX}:leads`;
+const lockKey      = (chatId) => `${PREFIX}:lock:${chatId}`;
 
 function isRedis() { return usingRedis; }
+
+// Lock de processamento CROSS-INSTÂNCIA (Redis SET NX PX). Garante que, se
+// houver mais de um container, o mesmo lead não seja processado em paralelo.
+// Sem Redis, retorna true (o lock em memória do index.js já basta numa instância).
+// Fail-open: se o Redis falhar, não trava o atendimento.
+async function acquireLock(chatId, ttlMs = 60000) {
+    if (!usingRedis) return true;
+    try {
+        const r = await redis.set(lockKey(chatId), '1', 'PX', ttlMs, 'NX');
+        return r === 'OK';
+    } catch (e) {
+        console.error('❌ acquireLock:', e.message);
+        return true; // fail-open
+    }
+}
+async function releaseLock(chatId) {
+    if (!usingRedis) return;
+    try { await redis.del(lockKey(chatId)); }
+    catch (e) { console.error('❌ releaseLock:', e.message); }
+}
 
 // Estado da conversa (leadData) por número
 async function getLead(chatId) {
@@ -100,4 +121,4 @@ async function appendLeadFinalizado(registro) {
     memLeads.push(registro);
 }
 
-module.exports = { isRedis, getLead, saveLead, deleteLead, appendLeadFinalizado, scanLeadIds };
+module.exports = { isRedis, getLead, saveLead, deleteLead, appendLeadFinalizado, scanLeadIds, acquireLock, releaseLock };

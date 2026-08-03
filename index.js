@@ -33,6 +33,11 @@ const ADMIN_KEY      = process.env.ADMIN_KEY      || '';
 // A IA NÃO responde em grupos por padrão (só conversa individual). Para permitir
 // grupos no futuro, defina IGNORAR_GRUPOS=false.
 const IGNORAR_GRUPOS = (process.env.IGNORAR_GRUPOS || 'true') !== 'false';
+// Rate-limit por número: no máximo RATE_LIMIT_MSGS mensagens por janela de
+// RATE_LIMIT_JANELA_S segundos (proteção contra loop/spam e custo OpenAI).
+// 0 desativa. Padrão: 20 msgs / 60s.
+const RATE_LIMIT_MSGS   = parseInt(process.env.RATE_LIMIT_MSGS   || '20', 10);
+const RATE_LIMIT_JANELA = parseInt(process.env.RATE_LIMIT_JANELA_S || '60', 10) * 1000;
 // Janela (ms) para AGRUPAR mensagens rápidas do mesmo cliente antes de responder.
 // No WhatsApp o cliente costuma mandar várias mensagens seguidas; juntamos tudo
 // num único turno em vez de responder só a primeira e ignorar o resto.
@@ -415,6 +420,16 @@ async function processarMensagem({ chatId, texto, tipo, mediaBase64, mediaUrl, m
         }
     }, 60000);
 
+    // Lock cross-instância (Redis): impede que outro container processe o mesmo
+    // lead ao mesmo tempo. Sem Redis, é no-op (o lock em memória acima já basta).
+    const lockRedis = await store.acquireLock(chatId, 60000);
+    if (!lockRedis) {
+        console.log(`🔒 ${chatId} já está sendo processado por outra instância — pulando.`);
+        clearTimeout(timeoutId);
+        processandoMensagem.delete(chatId);
+        return;
+    }
+
     let leadData = null;
     try {
         leadData = await store.getLead(chatId);
@@ -470,13 +485,14 @@ async function processarMensagem({ chatId, texto, tipo, mediaBase64, mediaUrl, m
         }
 
         // Documento (PDF/planilha/arquivo) → registra p/ o especialista (não é imagem).
+        // Acusa o recebimento e ENCERRA o turno (sem gerar outra mensagem em seguida);
+        // a próxima mensagem do cliente retoma a qualificação normalmente.
         if (tipo === 'document') {
             const ack = 'Recebi o arquivo! Vou deixar registrado pro nosso especialista analisar junto com você 😊';
             await enviarMensagem(chatId, ack);
             leadData.conversationHistory.push({ role: 'user', content: '[O cliente enviou um documento]' });
             leadData.conversationHistory.push({ role: 'assistant', content: ack });
-            texto = 'Enviei um arquivo.';
-            usuarioNoHistorico = true;
+            return;
         }
 
         // Vídeo → transcreve o áudio do vídeo (Whisper aceita mp4) p/ entender o que é falado.
@@ -656,6 +672,7 @@ async function processarMensagem({ chatId, texto, tipo, mediaBase64, mediaUrl, m
             try { await store.saveLead(chatId, leadData); }
             catch (e) { console.error('❌ Erro ao salvar estado da conversa:', e.message); }
         }
+        await store.releaseLock(chatId);
     }
 }
 
@@ -824,18 +841,43 @@ function parsePayload(body) {
 const mensagensProcessadas = new Set(); // dedup de webhooks
 const TIPOS_SUPORTADOS = ['text', 'image', 'document', 'audio', 'ptt', 'video'];
 
-app.post('/webhook', express.json({ limit: '10mb' }), async (req, res) => {
+// Valida o token do webhook contra WEBHOOK_SECRET. Aceita no header
+// (x-webhook-token / Authorization: Bearer), na query (?token=) ou no path
+// (/webhook/<token>). Se WEBHOOK_SECRET estiver vazio, o webhook fica aberto
+// (compat) — CONFIGURE-O antes do go-live e aponte a URL do ChatClean para
+// https://.../webhook/<secret> (ou .../webhook?token=<secret>).
+function webhookAutorizado(req) {
+    if (!WEBHOOK_SECRET) return true;
+    const raw = req.headers['x-webhook-token'] || req.headers['authorization'] || req.query.token || req.params.token || '';
+    const token = String(raw).replace(/^Bearer\s+/i, '');
+    if (token.length !== WEBHOOK_SECRET.length) return false;
+    const a = Buffer.from(token.padEnd(128).slice(0, 128));
+    const b = Buffer.from(WEBHOOK_SECRET.padEnd(128).slice(0, 128));
+    return crypto.timingSafeEqual(a, b);
+}
+
+// Rate-limit por número (janela deslizante em memória, por instância).
+const rateHits = new Map(); // chatId -> [timestamps]
+function dentroDoLimite(chatId) {
+    if (!RATE_LIMIT_MSGS) return true; // desativado
+    const agora = Date.now();
+    const hits = (rateHits.get(chatId) || []).filter(t => agora - t < RATE_LIMIT_JANELA);
+    hits.push(agora);
+    rateHits.set(chatId, hits);
+    if (rateHits.size > 5000) { // poda defensiva
+        for (const [k, v] of rateHits) {
+            if (!v.length || agora - v[v.length - 1] > RATE_LIMIT_JANELA) rateHits.delete(k);
+        }
+    }
+    return hits.length <= RATE_LIMIT_MSGS;
+}
+
+async function handleWebhook(req, res) {
     res.status(200).json({ status: 'ok' }); // responde rápido (evita retry do ChatClean)
     try {
-        if (WEBHOOK_SECRET) {
-            const raw = req.headers['x-webhook-token'] || req.headers['authorization'] || '';
-            const token = raw.replace(/^Bearer\s+/i, '');
-            const a = Buffer.from(token.padEnd(128).slice(0, 128));
-            const b = Buffer.from(WEBHOOK_SECRET.padEnd(128).slice(0, 128));
-            if (token.length !== WEBHOOK_SECRET.length || !crypto.timingSafeEqual(a, b)) {
-                console.warn('⚠️ Webhook com token inválido.');
-                return;
-            }
+        if (!webhookAutorizado(req)) {
+            console.warn('⚠️ Webhook com token inválido ou ausente — ignorado.');
+            return;
         }
 
         console.log('🔍 PAYLOAD RAW:', JSON.stringify(req.body, null, 2).slice(0, 4000));
@@ -850,6 +892,12 @@ app.post('/webhook', express.json({ limit: '10mb' }), async (req, res) => {
             return;
         }
 
+        // Rate-limit por número (anti-spam / loop / proteção de custo OpenAI).
+        if (!dentroDoLimite(parsed.chatId)) {
+            console.warn(`🚦 Rate-limit: ${parsed.chatId} passou de ${RATE_LIMIT_MSGS}/${RATE_LIMIT_JANELA / 1000}s — ignorando.`);
+            return;
+        }
+
         if (parsed.msgId) {
             if (mensagensProcessadas.has(parsed.msgId)) {
                 console.log(`↩️ Mensagem duplicada (${parsed.msgId}) ignorada`);
@@ -861,7 +909,7 @@ app.post('/webhook', express.json({ limit: '10mb' }), async (req, res) => {
             }
         }
 
-        // Mídia não suportada (vídeo, sticker, localização...) → fallback humanizado
+        // Mídia não suportada (sticker, localização...) → fallback humanizado
         if (!TIPOS_SUPORTADOS.includes(parsed.tipo)) {
             await enviarMensagem(parsed.chatId, 'Pode me mandar por texto o que você precisa? Assim consigo te ajudar melhor 🙂');
             return;
@@ -872,7 +920,11 @@ app.post('/webhook', express.json({ limit: '10mb' }), async (req, res) => {
     } catch (e) {
         console.error('❌ Erro no handler do webhook:', e);
     }
-});
+}
+
+// Aceita o token embutido no path (/webhook/<secret>) ou em /webhook (header/query).
+app.post('/webhook', express.json({ limit: '10mb' }), handleWebhook);
+app.post('/webhook/:token', express.json({ limit: '10mb' }), handleWebhook);
 
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', uptime: process.uptime(), timestamp: new Date().toISOString() });
@@ -952,6 +1004,7 @@ app.listen(PORT, () => {
     if (!CC_PUSH_URL)   console.warn('⚠️  CC_PUSH_URL não configurado — a IA não conseguirá responder.');
     if (!EQUIPE_NUMERO) console.warn('ℹ️  EQUIPE_NUMERO não configurado — resumo de lead só irá como nota interna.');
     if (!ADMIN_KEY)     console.warn('🔒 ADMIN_KEY não configurada — /leads e /diag ficarão BLOQUEADOS (503). Defina para liberar o acesso administrativo.');
+    if (!WEBHOOK_SECRET) console.warn('🔓 WEBHOOK_SECRET vazio — /webhook está ABERTO. Antes do go-live, defina-o e aponte a URL do ChatClean para /webhook/<secret>.');
     if (!process.env.OPENAI_API_KEY) { console.error('❌ OPENAI_API_KEY não configurada no .env!'); process.exit(1); }
     console.log(store.isRedis()
         ? '🗄️  Estado das conversas: Redis (persistente)'
