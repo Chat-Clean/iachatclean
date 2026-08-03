@@ -738,6 +738,10 @@ async function drenarFila(chatId) {
 // variantes de payload plano (from/remoteJid/chatId/isGroup).
 function ehGrupo(body = {}, msg = {}) {
     const info = msg.raw?.Info || {};
+    // Sinal nativo do ChatClean (o mais confiável): o ticket marca grupo.
+    if (body.ticket?.isGroup === true || body.ticket?.status === 'group') return true;
+    if (msg.ticket?.isGroup === true || msg.ticket?.status === 'group') return true;
+    // Sinais do whatsmeow / formato plano.
     if (info.IsGroup === true || body.isGroup === true || msg.isGroup === true) return true;
     const candidatos = [
         info.Chat, info.ChatJID, info.chat,
