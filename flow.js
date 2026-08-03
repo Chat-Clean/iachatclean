@@ -24,12 +24,17 @@ function determinarProximoCampo(leadData) {
     return null;
 }
 
-// Aplica os campos extraídos ao leadData (não sobrescreve o que já foi coletado).
+// Aplica os campos extraídos ao leadData. Por padrão NÃO sobrescreve o que já
+// foi coletado — exceto os campos que o cliente está CORRIGINDO explicitamente
+// (extraido.correcao = lista de campos, ex.: "na verdade a empresa é X").
 function aplicarCampos(leadData, extraido) {
     if (!extraido) return;
+    const correcoes = Array.isArray(extraido.correcao) ? extraido.correcao : [];
     for (const c of CAMPOS) {
-        if (extraido[c] !== null && extraido[c] !== undefined && extraido[c] !== '' && !leadData[c]) {
-            leadData[c] = extraido[c];
+        const v = extraido[c];
+        if (v === null || v === undefined || v === '') continue;
+        if (!leadData[c] || correcoes.includes(c)) {
+            leadData[c] = v;
         }
     }
 }

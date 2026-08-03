@@ -226,7 +226,8 @@ async function extrairInformacoesComIA(mensagem, campoAtual, historicoRecente = 
         const completion = await openai.chat.completions.create({
             model: 'gpt-4o-mini',
             messages: [...historicoRecente, { role: 'user', content: prompt }],
-            temperature: 0
+            temperature: 0,
+            response_format: { type: 'json_object' } // garante JSON válido (o prompt já pede JSON)
         });
         let res = completion.choices[0].message.content.trim();
         if (res.includes('```')) res = res.replace(/```json?/g, '').replace(/```/g, '').trim();
@@ -426,6 +427,11 @@ async function processarMensagem({ chatId, texto, tipo, mediaBase64, mediaUrl, m
         leadData.ultimaInteracao = Date.now(); // marca esta interação
         leadData.followUpDueAt = null; // nova mensagem cancela reativação pendente
 
+        // Mídia (imagem/vídeo/documento) já registra o turno do cliente no
+        // histórico com uma descrição rica; quando isso acontece, marcamos aqui
+        // para NÃO empurrar de novo o texto-placeholder no fim (evita duplicar).
+        let usuarioNoHistorico = false;
+
         // Reset
         if (String(texto).toLowerCase() === '/reset') {
             await store.deleteLead(chatId);
@@ -457,6 +463,7 @@ async function processarMensagem({ chatId, texto, tipo, mediaBase64, mediaUrl, m
                 leadData.conversationHistory.push({ role: 'user', content: '[O cliente enviou uma imagem]' });
             }
             texto = 'Enviei uma imagem.';
+            usuarioNoHistorico = true;
         }
 
         // Documento (PDF/planilha/arquivo) → registra p/ o especialista (não é imagem).
@@ -466,6 +473,7 @@ async function processarMensagem({ chatId, texto, tipo, mediaBase64, mediaUrl, m
             leadData.conversationHistory.push({ role: 'user', content: '[O cliente enviou um documento]' });
             leadData.conversationHistory.push({ role: 'assistant', content: ack });
             texto = 'Enviei um arquivo.';
+            usuarioNoHistorico = true;
         }
 
         // Vídeo → transcreve o áudio do vídeo (Whisper aceita mp4) p/ entender o que é falado.
@@ -499,6 +507,7 @@ async function processarMensagem({ chatId, texto, tipo, mediaBase64, mediaUrl, m
                 leadData.conversationHistory.push({ role: 'user', content: '[O cliente enviou um vídeo]' });
                 texto = 'Enviei um vídeo.';
             }
+            usuarioNoHistorico = true;
         }
 
         // Áudio → transcrição (Whisper). Se falhar, pede texto.
@@ -559,6 +568,11 @@ async function processarMensagem({ chatId, texto, tipo, mediaBase64, mediaUrl, m
             if (extraido.horarioPreferido && !leadData.horarioPreferido) leadData.horarioPreferido = extraido.horarioPreferido;
             if (extraido.tipoContato) leadData.tipoContato = extraido.tipoContato;
 
+            // Se o cliente corrigiu o segmento, re-detecta o gancho de case.
+            if (Array.isArray(extraido.correcao) && extraido.correcao.includes('segmento')) {
+                leadData.segmentoKey = null;
+            }
+
             // Detecta o segmento (para o gancho de case) a partir do que foi dito
             if (!leadData.segmentoKey) {
                 leadData.segmentoKey = detectarSegmento((extraido.segmento || '') + ' ' + texto);
@@ -567,7 +581,7 @@ async function processarMensagem({ chatId, texto, tipo, mediaBase64, mediaUrl, m
             // Cliente ATUAL pedindo suporte → encaminha para Suporte/CS (não é lead novo)
             if (extraido.tipoContato === 'cliente' && !leadData.finalizado) {
                 const hist = leadData.conversationHistory.slice(-8).map(h => ({ role: h.role === 'user' ? 'user' : 'assistant', content: h.content }));
-                leadData.conversationHistory.push({ role: 'user', content: texto });
+                if (!usuarioNoHistorico) leadData.conversationHistory.push({ role: 'user', content: texto });
                 await enviarMensagem(chatId, 'Entendi! Vou te encaminhar pro nosso time de Suporte, que já cuida disso com você 😊');
                 await notificarEquipe(leadData, chatId, { departamento: DEPARTAMENTOS.suporte, tagExtra: 'CLIENTE ATUAL' });
                 leadData.finalizado = true;
@@ -577,7 +591,7 @@ async function processarMensagem({ chatId, texto, tipo, mediaBase64, mediaUrl, m
             // Pediu explicitamente falar com humano → encaminha ao Comercial
             if (extraido.querFalarComHumano && !leadData.finalizado) {
                 const hist = leadData.conversationHistory.slice(-8).map(h => ({ role: h.role === 'user' ? 'user' : 'assistant', content: h.content }));
-                leadData.conversationHistory.push({ role: 'user', content: texto });
+                if (!usuarioNoHistorico) leadData.conversationHistory.push({ role: 'user', content: texto });
                 await encaminhar(chatId, leadData, DEPARTAMENTOS.comercial, texto, hist, exp);
                 return;
             }
@@ -602,7 +616,7 @@ async function processarMensagem({ chatId, texto, tipo, mediaBase64, mediaUrl, m
             // a próxima mensagem retoma a qualificação de onde parou).
             console.error(`❌ Erro ao gerar resposta IA para ${chatId}:`, e.message);
             await enviarMensagem(chatId, 'Opa, tive uma instabilidade rapidinha por aqui 😅 Pode me mandar de novo o que você disse?');
-            leadData.conversationHistory.push({ role: 'user', content: texto });
+            if (!usuarioNoHistorico) leadData.conversationHistory.push({ role: 'user', content: texto });
             return;
         }
 
@@ -611,7 +625,7 @@ async function processarMensagem({ chatId, texto, tipo, mediaBase64, mediaUrl, m
         leadData.analiseImagem = null;
 
         await enviarMensagensQuebradas(chatId, resposta);
-        leadData.conversationHistory.push({ role: 'user', content: texto });
+        if (!usuarioNoHistorico) leadData.conversationHistory.push({ role: 'user', content: texto });
         leadData.conversationHistory.push({ role: 'assistant', content: resposta });
         if (leadData.conversationHistory.length > 100) {
             leadData.conversationHistory = leadData.conversationHistory.slice(-100);

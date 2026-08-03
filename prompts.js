@@ -107,6 +107,7 @@ CAMPOS PARA EXTRAIR (retorne null quando o cliente não informou):
 - querAgendar: true SOMENTE se o cliente pedir EXPLICITAMENTE para marcar/agendar uma reunião, call, demonstração ou horário (ex.: "podemos marcar uma reunião?", "quero agendar uma call", "dá pra marcar um horário?", "bora marcar uma demo"). NÃO marque para frases que apenas descrevem o problema, a urgência ou a vontade de resolver ("quero resolver isso agora", "preciso disso urgente", "perco lead à noite") — nesses casos, querAgendar=false.
 - slotEscolhido: se o assistente acabou de oferecer horários NUMERADOS e o cliente escolheu um, retorne o número (1, 2, 3...). Senão null.
 - objecao: se a mensagem contiver uma objeção clara, retorne UM de: "preco", "concorrente_barato", "ia_robotica", "publico_mais_velho", "sem_tempo", "ja_tenho_whatsapp", "medo_de_nao_funcionar", "preciso_pensar". Senão null.
+- correcao: lista (array) dos campos que o cliente está EXPLICITAMENTE corrigindo ou atualizando em relação ao que já disse antes (ex.: "na verdade a empresa é X" → ["empresa"]; "corrigindo, somos de São Paulo" → ["cidadeEstado"]; "me confundi, é energia solar mesmo" → ["segmento"]). Use os nomes exatos: objetivo, nome, empresa, segmento, cidadeEstado, canais, volume, dor, urgencia, decisor. Retorne [] quando não houver correção — só marque quando o cliente sinalizar que está mudando algo já informado.
 
 REGRAS:
 - NUNCA confunda saudação com nome.
