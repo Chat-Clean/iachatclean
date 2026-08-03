@@ -345,6 +345,22 @@ async function encaminhar(chatId, leadData, departamento, mensagemCliente, histo
     leadData.followUpDueAt = null;
 }
 
+// Interpreta qual horário o cliente escolheu da lista numerada. Usa o que a IA
+// extraiu (slotEscolhido) e, como REFORÇO, lê o texto cru — dígito isolado
+// ("1", "opção 2") ou ordinal por extenso ("o primeiro", "a segunda"). Sem isso,
+// dependia só do LLM devolver slotEscolhido, e um simples "1" às vezes escapava
+// → o agendamento não rodava e a IA acabava dizendo que agendou sem agendar.
+function escolhaDeSlot(texto, extraido, nSlots) {
+    const n = Number(extraido?.slotEscolhido);
+    if (Number.isInteger(n) && n >= 1 && n <= nSlots) return n;
+    const t = String(texto || '').toLowerCase();
+    const mDig = t.match(/\b([1-9])\b/);
+    if (mDig) { const d = Number(mDig[1]); if (d >= 1 && d <= nSlots) return d; }
+    const ordinais = [['primeir', 1], ['segund', 2], ['terceir', 3], ['quart', 4], ['quint', 5]];
+    for (const [k, v] of ordinais) if (t.includes(k) && v <= nSlots) return v;
+    return null;
+}
+
 // =============================================================
 //  AGENDAMENTO (Google Calendar) — inerte se não configurado.
 //  Retorna true se já tratou o turno (o chamador deve dar return).
@@ -354,9 +370,9 @@ async function tratarAgendamento(chatId, leadData, texto, extraido, exp) {
 
     // 1) Cliente escolhendo um horário já oferecido → cria o evento
     if (leadData.aguardandoEscolhaSlot) {
-        const escolha = Number(extraido?.slotEscolhido);
         const slots = leadData.slotsOferecidos || [];
-        if (escolha >= 1 && slots[escolha - 1]) {
+        const escolha = escolhaDeSlot(texto, extraido, slots.length);
+        if (escolha && slots[escolha - 1]) {
             const s = slots[escolha - 1];
             try {
                 const ev = await cal.agendarReuniao({
