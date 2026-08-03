@@ -30,6 +30,9 @@ const PORT           = process.env.PORT           || 3000;
 // Chave para proteger os endpoints administrativos (/leads, /diag), que expõem
 // dados de leads e config. Sem ela, esses endpoints ficam BLOQUEADOS (não abertos).
 const ADMIN_KEY      = process.env.ADMIN_KEY      || '';
+// A IA NÃO responde em grupos por padrão (só conversa individual). Para permitir
+// grupos no futuro, defina IGNORAR_GRUPOS=false.
+const IGNORAR_GRUPOS = (process.env.IGNORAR_GRUPOS || 'true') !== 'false';
 // Janela (ms) para AGRUPAR mensagens rápidas do mesmo cliente antes de responder.
 // No WhatsApp o cliente costuma mandar várias mensagens seguidas; juntamos tudo
 // num único turno em vez de responder só a primeira e ignorar o resto.
@@ -730,6 +733,21 @@ async function drenarFila(chatId) {
     else filaPorChat.delete(chatId);
 }
 
+// Detecta se a mensagem veio de um GRUPO. O whatsmeow expõe Info.IsGroup e
+// Info.Chat (JID do chat); grupo = JID termina em "@g.us". Cobrimos também
+// variantes de payload plano (from/remoteJid/chatId/isGroup).
+function ehGrupo(body = {}, msg = {}) {
+    const info = msg.raw?.Info || {};
+    if (info.IsGroup === true || body.isGroup === true || msg.isGroup === true) return true;
+    const candidatos = [
+        info.Chat, info.ChatJID, info.chat,
+        msg.chatId, msg.from, msg.remoteJid,
+        body.chatId, body.from, body.remoteJid, body.remotejid,
+        body.contact?.remoteJid, body.contact?.jid
+    ];
+    return candidatos.some(j => typeof j === 'string' && j.includes('@g.us'));
+}
+
 // =============================================================
 //  WEBHOOK — PARSE DO PAYLOAD DO CHATCLEAN
 // =============================================================
@@ -748,6 +766,7 @@ function parsePayload(body) {
             const contato = body.contact || {};
             const msg     = body.message || {};
             if (msg.fromMe) return null; // ignora eco do próprio bot/atendente
+            if (IGNORAR_GRUPOS && ehGrupo(body, msg)) { console.log('👥 Mensagem de grupo ignorada'); return null; }
             const senderAlt = msg.raw?.Info?.SenderAlt ? String(msg.raw.Info.SenderAlt).split('@')[0] : null;
             const numero = contato.number || contato.phone || body.number || senderAlt || msg.number;
             const phone  = normalizarPhone(numero);
@@ -768,6 +787,7 @@ function parsePayload(body) {
         // Formato plano (webhook/n8n simples): { number, type, body, contactName, id }
         if (body?.number && (body?.body !== undefined || body?.type)) {
             if (body.fromMe) return null;
+            if (IGNORAR_GRUPOS && ehGrupo(body)) { console.log('👥 Mensagem de grupo ignorada'); return null; }
             const phone = normalizarPhone(body.number);
             if (!phone) return null;
             return {
