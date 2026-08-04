@@ -27,6 +27,11 @@ function parseHHMM(s, def) {
 }
 const INICIO_MIN = parseHHMM(process.env.AGENDA_INICIO, 9 * 60 + 30); // 09:30
 const FIM_MIN    = parseHHMM(process.env.AGENDA_FIM, 17 * 60);        // 17:00
+// Horário de almoço — não oferece reuniões que caiam nessa janela.
+// Configurável via ALMOCO_INICIO/ALMOCO_FIM ("HH:MM"). Padrão: 12:30 às 13:30.
+// Para desativar, use valores iguais (ex.: ALMOCO_INICIO=ALMOCO_FIM=00:00).
+const ALMOCO_INI = parseHHMM(process.env.ALMOCO_INICIO, 12 * 60 + 30); // 12:30
+const ALMOCO_FIM = parseHHMM(process.env.ALMOCO_FIM, 13 * 60 + 30);    // 13:30
 
 const CLIENT_ID     = process.env.GOOGLE_CLIENT_ID     || '';
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
@@ -79,6 +84,8 @@ function gerarCandidatos({ dias, aPartirDe }) {
         const ymd = ymdNatal(d);
         const passo = DURACAO_MIN >= 60 ? DURACAO_MIN : 30; // passo dos horários
         for (let mins = INICIO_MIN; mins + DURACAO_MIN <= FIM_MIN; mins += passo) {
+            // Pula horários que colidem com o almoço (sobreposição de intervalos).
+            if (mins < ALMOCO_FIM && mins + DURACAO_MIN > ALMOCO_INI) continue;
             const start = slotNatal(ymd, Math.floor(mins / 60), mins % 60);
             const end = new Date(start.getTime() + DURACAO_MIN * 60000);
             if (start.getTime() <= aPartirDe.getTime()) continue; // só futuro
