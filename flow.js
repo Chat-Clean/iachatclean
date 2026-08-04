@@ -57,4 +57,20 @@ function detectarSegmento(texto) {
     return null;
 }
 
-module.exports = { CAMPOS, determinarProximoCampo, aplicarCampos, detectarSegmento };
+// Interpreta qual horário o cliente escolheu de uma lista NUMERADA de reuniões.
+// Usa o que a IA extraiu (slotEscolhido) e, como reforço, lê o texto cru — dígito
+// isolado ("1", "opção 2") ou ordinal por extenso ("o primeiro", "a segunda").
+// Sem esse reforço, dependia só do LLM devolver slotEscolhido e um "1" às vezes
+// escapava. Retorna o número (1..nSlots) ou null.
+function escolhaDeSlot(texto, extraido, nSlots) {
+    const n = Number(extraido?.slotEscolhido);
+    if (Number.isInteger(n) && n >= 1 && n <= nSlots) return n;
+    const t = String(texto || '').toLowerCase();
+    const mDig = t.match(/\b([1-9])\b/);
+    if (mDig) { const d = Number(mDig[1]); if (d >= 1 && d <= nSlots) return d; }
+    const ordinais = [['primeir', 1], ['segund', 2], ['terceir', 3], ['quart', 4], ['quint', 5]];
+    for (const [k, v] of ordinais) if (t.includes(k) && v <= nSlots) return v;
+    return null;
+}
+
+module.exports = { CAMPOS, determinarProximoCampo, aplicarCampos, detectarSegmento, escolhaDeSlot };

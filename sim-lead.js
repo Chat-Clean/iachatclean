@@ -11,7 +11,7 @@ require('dotenv').config();
 const OpenAI = require('openai');
 const { SYSTEM_SDR, promptExtracao, promptResposta } = require('./prompts');
 const { SEGMENTOS, DEPARTAMENTOS } = require('./data');
-const { determinarProximoCampo, aplicarCampos, detectarSegmento } = require('./flow');
+const { determinarProximoCampo, aplicarCampos, detectarSegmento, escolhaDeSlot } = require('./flow');
 const { estaEmExpediente } = require('./horario');
 const cal = require('./calendar');
 
@@ -118,9 +118,9 @@ async function turno(texto) {
 async function agendarSubfluxo(texto, extraido) {
     if (!cal.configurado()) return null;
     if (leadData.aguardandoEscolhaSlot) {
-        const escolha = Number(extraido?.slotEscolhido);
         const slots = leadData.slotsOferecidos || [];
-        if (escolha >= 1 && slots[escolha - 1]) {
+        const escolha = escolhaDeSlot(texto, extraido, slots.length);
+        if (escolha && slots[escolha - 1]) {
             const s = slots[escolha - 1];
             const ev = await cal.agendarReuniao({
                 start: s.start, end: s.end, calendarId: s.calendarId,
@@ -131,9 +131,10 @@ async function agendarSubfluxo(texto, extraido) {
             leadData.aguardandoEscolhaSlot = false; leadData.slotsOferecidos = null; leadData.finalizado = true;
             return `Prontinho! Deixei sua reunião marcada para ${ev.label} com um especialista da ChatClean 😊`;
         }
+        if (extraido?.recusouReuniao) { leadData.aguardandoEscolhaSlot = false; leadData.slotsOferecidos = null; }
         return null;
     }
-    const deveAgendar = (leadData.qualificacaoCompleta && !exp.aberto) || extraido?.querAgendar;
+    const deveAgendar = leadData.qualificacaoCompleta || extraido?.querAgendar;
     if (deveAgendar && !leadData.reuniaoAgendada) {
         const slots = await cal.horariosLivres({ dias: 5, max: 3 });
         if (!slots.length) return null;

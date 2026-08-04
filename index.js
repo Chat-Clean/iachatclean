@@ -49,7 +49,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const { EMPRESA_INFO, SEGMENTOS, DEPARTAMENTOS } = require('./data');
 const { SYSTEM_SDR, promptExtracao, promptResposta } = require('./prompts');
-const { determinarProximoCampo, aplicarCampos, detectarSegmento } = require('./flow');
+const { determinarProximoCampo, aplicarCampos, detectarSegmento, escolhaDeSlot } = require('./flow');
 const { estaEmExpediente } = require('./horario');
 const cal = require('./calendar'); // Google Calendar (inerte se não configurado)
 const store = require('./store'); // estado das conversas (Redis + fallback em memória)
@@ -345,22 +345,6 @@ async function encaminhar(chatId, leadData, departamento, mensagemCliente, histo
     leadData.followUpDueAt = null;
 }
 
-// Interpreta qual horário o cliente escolheu da lista numerada. Usa o que a IA
-// extraiu (slotEscolhido) e, como REFORÇO, lê o texto cru — dígito isolado
-// ("1", "opção 2") ou ordinal por extenso ("o primeiro", "a segunda"). Sem isso,
-// dependia só do LLM devolver slotEscolhido, e um simples "1" às vezes escapava
-// → o agendamento não rodava e a IA acabava dizendo que agendou sem agendar.
-function escolhaDeSlot(texto, extraido, nSlots) {
-    const n = Number(extraido?.slotEscolhido);
-    if (Number.isInteger(n) && n >= 1 && n <= nSlots) return n;
-    const t = String(texto || '').toLowerCase();
-    const mDig = t.match(/\b([1-9])\b/);
-    if (mDig) { const d = Number(mDig[1]); if (d >= 1 && d <= nSlots) return d; }
-    const ordinais = [['primeir', 1], ['segund', 2], ['terceir', 3], ['quart', 4], ['quint', 5]];
-    for (const [k, v] of ordinais) if (t.includes(k) && v <= nSlots) return v;
-    return null;
-}
-
 // =============================================================
 //  AGENDAMENTO (Google Calendar) — inerte se não configurado.
 //  Retorna true se já tratou o turno (o chamador deve dar return).
@@ -396,11 +380,19 @@ async function tratarAgendamento(chatId, leadData, texto, extraido, exp) {
                 return false;
             }
         }
-        return false; // não entendeu a escolha → fluxo normal responde
+        // Não escolheu um horário. Se RECUSOU a reunião, encerra a espera para o
+        // fluxo normal encaminhar ao time (triagem). Se só trouxe uma dúvida,
+        // segue aguardando (o fluxo responde a dúvida sem finalizar).
+        if (extraido?.recusouReuniao) {
+            leadData.aguardandoEscolhaSlot = false;
+            leadData.slotsOferecidos = null;
+        }
+        return false;
     }
 
-    // 2) Deve oferecer horários? (fim da qualificação fora do expediente OU cliente pediu p/ agendar)
-    const deveAgendar = (leadData.qualificacaoCompleta && !exp.aberto) || extraido?.querAgendar;
+    // 2) Deve oferecer horários? Sempre após a qualificação (dentro OU fora do
+    //    expediente), ou quando o cliente pede explicitamente para agendar.
+    const deveAgendar = leadData.qualificacaoCompleta || extraido?.querAgendar;
     if (deveAgendar && !leadData.reuniaoAgendada) {
         let slots = [];
         try { slots = await cal.horariosLivres({ dias: 5, max: 3 }); }
@@ -669,9 +661,11 @@ async function processarMensagem({ chatId, texto, tipo, mediaBase64, mediaUrl, m
             leadData.conversationHistory = leadData.conversationHistory.slice(-100);
         }
 
-        // Qualificação completa → notifica a equipe (transfere ao vivo em expediente;
-        // fora do expediente, sinaliza para agendar o retorno).
-        if (leadData.qualificacaoCompleta && !leadData.finalizado) {
+        // Qualificação completa → notifica a equipe e encerra (triagem). NÃO
+        // finaliza enquanto o cliente ainda está escolhendo um horário de reunião
+        // (aguardandoEscolhaSlot) — nesse caso a IA segue conversando/tirando
+        // dúvidas até ele escolher, recusar, ou o agendamento concluir.
+        if (leadData.qualificacaoCompleta && !leadData.finalizado && !leadData.aguardandoEscolhaSlot) {
             await notificarEquipe(leadData, chatId, {
                 departamento: DEPARTAMENTOS.comercial,
                 tagExtra: exp.aberto ? undefined : 'FORA DE EXPEDIENTE — AGENDAR RETORNO',
