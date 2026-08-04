@@ -38,6 +38,12 @@ const IGNORAR_GRUPOS = (process.env.IGNORAR_GRUPOS || 'true') !== 'false';
 // 0 desativa. Padrão: 20 msgs / 60s.
 const RATE_LIMIT_MSGS   = parseInt(process.env.RATE_LIMIT_MSGS   || '20', 10);
 const RATE_LIMIT_JANELA = parseInt(process.env.RATE_LIMIT_JANELA_S || '60', 10) * 1000;
+// Blindagem anti-loop (contra outras IAs / auto-respondedores): se um mesmo
+// contato trocar mais de LOOP_MAX_TURNOS mensagens em LOOP_JANELA_MIN minutos,
+// ou repetir a mesma mensagem, a IA PAUSA as respostas para não entrar em
+// ping-pong infinito com outro bot.
+const LOOP_MAX_TURNOS = parseInt(process.env.LOOP_MAX_TURNOS || '15', 10);
+const LOOP_JANELA_MS  = parseInt(process.env.LOOP_JANELA_MIN || '3', 10) * 60 * 1000;
 // Janela (ms) para AGRUPAR mensagens rápidas do mesmo cliente antes de responder.
 // No WhatsApp o cliente costuma mandar várias mensagens seguidas; juntamos tudo
 // num único turno em vez de responder só a primeira e ignorar o resto.
@@ -467,6 +473,31 @@ async function processarMensagem({ chatId, texto, tipo, mediaBase64, mediaUrl, m
             leadData = null;
             await enviarMensagem(chatId, '🔄 Conversa resetada! Vamos começar de novo 😊');
             return;
+        }
+
+        // --- Blindagem anti-loop (contra outras IAs / auto-respondedores) ---
+        // Se o contato dispara muitas mensagens numa janela curta, ou repete a
+        // mesma mensagem, PAUSA as respostas — evita ping-pong infinito com outro
+        // bot (ex.: IA da operadora). Cobre também o caminho pós-encaminhamento.
+        {
+            const agoraMs = Date.now();
+            leadData.turnosTs = (leadData.turnosTs || []).filter(t => agoraMs - t < LOOP_JANELA_MS);
+            leadData.turnosTs.push(agoraMs);
+            if (leadData.turnosTs.length <= 2) leadData.loopAvisado = false; // conversa normalizou
+            const textoNorm = String(texto || '').toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 200);
+            leadData.ultimasMsgs = leadData.ultimasMsgs || [];
+            const repetida = textoNorm.length > 1 && leadData.ultimasMsgs.filter(t => t === textoNorm).length >= 2;
+            leadData.ultimasMsgs.push(textoNorm);
+            if (leadData.ultimasMsgs.length > 6) leadData.ultimasMsgs.shift();
+
+            if (leadData.turnosTs.length > LOOP_MAX_TURNOS || repetida) {
+                if (!leadData.loopAvisado) {
+                    console.warn(`🔁 Possível loop/bot em ${chatId} (${leadData.turnosTs.length} msgs/${LOOP_JANELA_MS / 60000}min${repetida ? ', msg repetida' : ''}) — pausando respostas.`);
+                    if (EQUIPE_NUMERO) { try { await ccPush(EQUIPE_NUMERO, { body: `⚠️ Possível loop com outro bot/IA no contato ${chatId}. A IA pausou as respostas para não entrar em ping-pong. Verificar manualmente.` }); } catch (_) {} }
+                    leadData.loopAvisado = true;
+                }
+                return; // não responde — corta o loop
+            }
         }
 
         // Lead já encaminhado → só tira dúvidas pontuais, sem refazer o funil

@@ -19,7 +19,14 @@ const { google } = require('googleapis');
 
 const TZ = 'America/Recife'; // Natal-RN, UTC-3 fixo (sem horário de verão)
 const OFFSET = '-03:00';
-const ABRE = 9, FECHA = 18;
+// Janela de AGENDAMENTO (horários de reunião oferecidos). Configurável via env
+// AGENDA_INICIO / AGENDA_FIM no formato "HH:MM". Padrão: 09:30 às 17:00.
+function parseHHMM(s, def) {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || '').trim());
+    return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : def;
+}
+const INICIO_MIN = parseHHMM(process.env.AGENDA_INICIO, 9 * 60 + 30); // 09:30
+const FIM_MIN    = parseHHMM(process.env.AGENDA_FIM, 17 * 60);        // 17:00
 
 const CLIENT_ID     = process.env.GOOGLE_CLIENT_ID     || '';
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
@@ -70,15 +77,12 @@ function gerarCandidatos({ dias, aPartirDe }) {
         if (wd === 'Sat' || wd === 'Sun') continue;
         uteis++;
         const ymd = ymdNatal(d);
-        const limite = slotNatal(ymd, FECHA, 0);
-        for (let h = ABRE; h < FECHA; h++) {
-            for (const m of (DURACAO_MIN >= 60 ? [0] : [0, 30])) {
-                const start = slotNatal(ymd, h, m);
-                const end = new Date(start.getTime() + DURACAO_MIN * 60000);
-                if (end > limite) continue;
-                if (start.getTime() <= aPartirDe.getTime()) continue; // só futuro
-                slots.push({ start, end });
-            }
+        const passo = DURACAO_MIN >= 60 ? DURACAO_MIN : 30; // passo dos horários
+        for (let mins = INICIO_MIN; mins + DURACAO_MIN <= FIM_MIN; mins += passo) {
+            const start = slotNatal(ymd, Math.floor(mins / 60), mins % 60);
+            const end = new Date(start.getTime() + DURACAO_MIN * 60000);
+            if (start.getTime() <= aPartirDe.getTime()) continue; // só futuro
+            slots.push({ start, end });
         }
     }
     return slots;
