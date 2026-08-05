@@ -62,6 +62,7 @@ const { SYSTEM_SDR, promptExtracao, promptResposta } = require('./prompts');
 const { determinarProximoCampo, aplicarCampos, detectarSegmento, escolhaDeSlot } = require('./flow');
 const { estaEmExpediente } = require('./horario');
 const cal = require('./calendar'); // Google Calendar (inerte se não configurado)
+const pipeline = require('./pipeline'); // Oportunidades no CRM (inerte se não configurado)
 const store = require('./store'); // estado das conversas (Redis + fallback em memória)
 
 const processandoMensagem = new Map(); // lock de processamento (por instância)
@@ -381,6 +382,21 @@ async function tratarAgendamento(chatId, leadData, texto, extraido, exp) {
                 await enviarMensagem(chatId, msg);
                 leadData.conversationHistory.push({ role: 'user', content: texto });
                 leadData.conversationHistory.push({ role: 'assistant', content: msg });
+                // Cria a oportunidade no funil comercial (etapa "REUNIÃO MARCADA").
+                // Best-effort: falha aqui NÃO impacta o agendamento nem o atendimento.
+                if (pipeline.configurado()) {
+                    if (leadData.contactId) {
+                        // nome fixo "REUNIÃO MARCADA" (decisão do Fabrício, via PIPELINE_OPP_NOME);
+                        // o contato do lead já fica vinculado ao card. Descrição com data/hora.
+                        const opp = await pipeline.criarOportunidade({
+                            contactId: leadData.contactId,
+                            descricao: `Reunião marcada para ${ev.label}`
+                        });
+                        if (opp) leadData.oportunidadeId = opp.id;
+                    } else {
+                        console.warn(`⚠️ ${chatId}: reunião agendada sem contactId — oportunidade não criada no CRM.`);
+                    }
+                }
                 await notificarEquipe(leadData, chatId, { departamento: DEPARTAMENTOS.comercial, tagExtra: 'REUNIÃO AGENDADA' });
                 leadData.finalizado = true;
                 return true;
@@ -428,7 +444,7 @@ async function tratarAgendamento(chatId, leadData, texto, extraido, exp) {
 // =============================================================
 //  PROCESSAMENTO DE MENSAGEM
 // =============================================================
-async function processarMensagem({ chatId, texto, tipo, mediaBase64, mediaUrl, mediaMimetype, quotedText, nomeContato }) {
+async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, mediaUrl, mediaMimetype, quotedText, nomeContato }) {
     if (processandoMensagem.get(chatId)) {
         console.log(`⚠️ Já processando mensagem de ${chatId}. Ignorando.`);
         return;
@@ -463,6 +479,7 @@ async function processarMensagem({ chatId, texto, tipo, mediaBase64, mediaUrl, m
         }
         if (!leadData) leadData = { conversationHistory: [] };
         if (nomeContato && !leadData.nome) leadData.nome = nomeContato;
+        if (contactId && !leadData.contactId) leadData.contactId = contactId; // p/ criar oportunidade no CRM ao agendar
         leadData.ultimaInteracao = Date.now(); // marca esta interação
         leadData.followUpDueAt = null; // nova mensagem cancela reativação pendente
 
@@ -760,16 +777,18 @@ function enfileirar(parsed) {
 function proximaUnidade(fila) {
     if (fila[0].tipo !== 'text') return fila.shift();
     const textos = [], ids = [];
-    let nome = '', quoted = null;
+    let nome = '', quoted = null, contactId = null;
     while (fila.length && fila[0].tipo === 'text') {
         const m = fila.shift();
         if (m.texto) textos.push(m.texto);
         if (m.msgId) ids.push(m.msgId);
         if (!nome && m.nomeContato) nome = m.nomeContato;
         if (!quoted && m.quotedText) quoted = m.quotedText;
+        if (!contactId && m.contactId) contactId = m.contactId;
     }
     return {
         chatId: null, // preenchido pelo chamador
+        contactId,
         tipo: 'text',
         texto: textos.join('\n'),
         msgId: ids.join(',') || null,
@@ -868,8 +887,12 @@ function parsePayload(body) {
             const numero = contato.number || contato.phone || body.number || senderAlt || wabaFrom || msg.number;
             const phone  = normalizarPhone(numero);
             if (!phone) return null;
+            // contactId do CRM — usado para criar oportunidade no funil ao agendar.
+            const tk = getTicket(body, msg);
+            const contactId = msg.contactId || contato.id || tk.contactId || body.contactId || null;
             return {
                 chatId:        phone,
+                contactId:     contactId ? Number(contactId) : null,
                 msgId:         msg.id ? String(msg.id) : (msg.messageId ? String(msg.messageId) : null),
                 texto:         String(msg.body || msg.text || '').trim(),
                 tipo:          normTipo(msg.type || msg.mediaType),
@@ -890,6 +913,7 @@ function parsePayload(body) {
             if (!phone) return null;
             return {
                 chatId:        phone,
+                contactId:     body.contactId ? Number(body.contactId) : (body.contact?.id ? Number(body.contact.id) : null),
                 msgId:         body.id ? String(body.id) : null,
                 texto:         String(body.body || '').trim(),
                 tipo:          normTipo(body.type),
@@ -1052,7 +1076,8 @@ app.get('/diag', async (req, res) => {
         pushConfigurado: !!CC_PUSH_URL,
         equipeNumero: !!EQUIPE_NUMERO,
         calendar: cfg,
-        calendarLive
+        calendarLive,
+        pipeline: pipeline.diag()
     });
 });
 
