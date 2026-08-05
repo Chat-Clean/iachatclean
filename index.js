@@ -386,10 +386,14 @@ async function tratarAgendamento(chatId, leadData, texto, extraido, exp) {
                 // Best-effort: falha aqui NÃO impacta o agendamento nem o atendimento.
                 if (pipeline.configurado()) {
                     if (leadData.contactId) {
-                        // nome fixo "REUNIÃO MARCADA" (decisão do Fabrício, via PIPELINE_OPP_NOME);
-                        // o contato do lead já fica vinculado ao card. Descrição com data/hora.
+                        // Nome do card = nome do lead (+ empresa, quando houver) para
+                        // bater o olho no Kanban. Sem nome → cai no PIPELINE_OPP_NOME.
+                        const nomeCard = leadData.nome
+                            ? `${leadData.nome}${leadData.empresa ? ' — ' + leadData.empresa : ''}`
+                            : undefined;
                         const opp = await pipeline.criarOportunidade({
                             contactId: leadData.contactId,
+                            nome: nomeCard,
                             descricao: `Reunião marcada para ${ev.label}`
                         });
                         if (opp) leadData.oportunidadeId = opp.id;
