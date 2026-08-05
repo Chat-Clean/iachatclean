@@ -33,6 +33,10 @@ const ADMIN_KEY      = process.env.ADMIN_KEY      || '';
 // A IA NÃO responde em grupos por padrão (só conversa individual). Para permitir
 // grupos no futuro, defina IGNORAR_GRUPOS=false.
 const IGNORAR_GRUPOS = (process.env.IGNORAR_GRUPOS || 'true') !== 'false';
+// A IA só responde tickets PENDENTES (na fila). Quando um humano aceita a
+// conversa (ticket sai de "pending"), a IA para de responder. Para desativar
+// esse filtro, defina IA_SO_PENDENTES=false.
+const IA_SO_PENDENTES = (process.env.IA_SO_PENDENTES || 'true') !== 'false';
 // Rate-limit por número: no máximo RATE_LIMIT_MSGS mensagens por janela de
 // RATE_LIMIT_JANELA_S segundos (proteção contra loop/spam e custo OpenAI).
 // 0 desativa. Padrão: 20 msgs / 60s.
@@ -813,6 +817,30 @@ function ehGrupo(body = {}, msg = {}) {
     return candidatos.some(j => typeof j === 'string' && j.includes('@g.us'));
 }
 
+// Ticket do payload (pode vir em body.ticket ou message.ticket, conforme o canal).
+function getTicket(body = {}, msg = {}) {
+    return body.ticket || msg.ticket || {};
+}
+function ticketStatus(body = {}, msg = {}) {
+    return getTicket(body, msg).status || null;
+}
+// A IA atua como bot de fila: responde enquanto NINGUÉM humano assumiu o ticket.
+// - status "pending" (na fila) → responde
+// - status "closed" → não responde
+// - ticket com userId humano atribuído (a pessoa ACEITOU a conversa) → não responde
+// - sem status no payload → responde (compat)
+// Assim, no instante em que o atendente aceita (userId é atribuído / status muda),
+// a IA para — sem o risco de silenciar leads novos que chegem como "open".
+function deveResponderTicket(body = {}, msg = {}) {
+    if (!IA_SO_PENDENTES) return true;
+    const t = getTicket(body, msg);
+    if (t.userId) return false;             // humano ACEITOU (userId atribuído) → para
+    const st = t.status || null;
+    if (!st) return true;                   // sem status → compat
+    if (st === 'closed') return false;      // encerrado
+    return true;                            // pending / open sem humano → responde
+}
+
 // =============================================================
 //  WEBHOOK — PARSE DO PAYLOAD DO CHATCLEAN
 // =============================================================
@@ -832,6 +860,7 @@ function parsePayload(body) {
             const msg     = body.message || {};
             if (msg.fromMe) return null; // ignora eco do próprio bot/atendente
             if (IGNORAR_GRUPOS && ehGrupo(body, msg)) { console.log('👥 Mensagem de grupo ignorada'); return null; }
+            if (!deveResponderTicket(body, msg)) { console.log(`⏭️ Ticket "${ticketStatus(body, msg)}" (aceito/atendido por humano) — IA não responde`); return null; }
             const senderAlt = msg.raw?.Info?.SenderAlt ? String(msg.raw.Info.SenderAlt).split('@')[0] : null;
             // WABA (WhatsApp Oficial): o número do remetente vem em message.raw.from
             // (não existe raw.Info.SenderAlt como no WhatsApp Web/whatsmeow).
@@ -856,6 +885,7 @@ function parsePayload(body) {
         if (body?.number && (body?.body !== undefined || body?.type)) {
             if (body.fromMe) return null;
             if (IGNORAR_GRUPOS && ehGrupo(body)) { console.log('👥 Mensagem de grupo ignorada'); return null; }
+            if (!deveResponderTicket(body)) { console.log(`⏭️ Ticket "${ticketStatus(body)}" (aceito/atendido por humano) — IA não responde`); return null; }
             const phone = normalizarPhone(body.number);
             if (!phone) return null;
             return {
