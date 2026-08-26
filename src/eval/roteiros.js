@@ -66,6 +66,29 @@ const ROTEIROS = [
             'preciso resolver isso essa semana, a decisão é minha mesmo',
             'olha esse link aqui https://www.exemplo.com.br/meu-cardapio o que acha?'
         ]
+    },
+    {
+        id: 'lead-esquivo',
+        descricao: 'Lead que se recusa a informar um campo. O funil nao pode travar nele.',
+        falas: [
+            'oi, quero melhorar meu atendimento',
+            'sou o Joao',
+            'prefiro nao dizer o nome da empresa por enquanto',
+            'ja falei, nao quero informar isso agora',
+            'voce pode seguir sem esse dado?',
+            'de novo isso? eu ja disse que nao vou passar'
+        ]
+    },
+    {
+        id: 'humano-confuso',
+        descricao: 'Lead sinalizando que nao entendeu ou que foi mal interpretado.',
+        falas: [
+            'oi',
+            'nao entendi sua pergunta',
+            'nao foi isso que eu perguntei',
+            'voce ja me perguntou isso',
+            'quero falar com uma pessoa de verdade'
+        ]
     }
 ];
 
