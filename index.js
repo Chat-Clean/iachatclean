@@ -10,6 +10,9 @@ const { AsyncLocalStorage } = require('async_hooks');
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
+// Painéis low-code nem sempre deixam escolher o Content-Type: aceitar formulário
+// evita que o corpo chegue vazio e a mensagem seja descartada em silêncio.
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // =============================================================
 //  CONFIGURAÇÃO — ChatClean (Webhook de entrada + Push API de saída)
@@ -926,6 +929,46 @@ function deveResponderTicket(body = {}, msg = {}) {
 // =============================================================
 //  WEBHOOK — PARSE DO PAYLOAD DO CHATCLEAN
 // =============================================================
+// Desembrulha o corpo até chegar ao payload do ChatClean. Quem chama a API nem
+// sempre manda o objeto cru: o n8n, por exemplo, entrega um ARRAY de itens e põe
+// o payload real em .body, ao lado de headers/query/webhookUrl. Outros blocos
+// mandam o JSON como string ou dentro de data/payload. Sem isso, tudo que não
+// fosse o formato exato caía em "payload não reconhecido".
+function normalizarCorpo(body) {
+    let b = body;
+    for (let i = 0; i < 6; i++) { // teto p/ não girar em payload malformado
+        if (typeof b === 'string') {
+            const t = b.trim();
+            if (!t.startsWith('{') && !t.startsWith('[')) return body;
+            try { b = JSON.parse(t); continue; } catch (_) { return body; }
+        }
+        if (Array.isArray(b)) {
+            if (!b.length) return body;
+            b = b[0];                       // n8n: lista de itens
+            continue;
+        }
+        if (!b || typeof b !== 'object') return body;
+
+        // Envelope do n8n: { headers, params, query, body, webhookUrl }.
+        if (b.body && typeof b.body === 'object' &&
+            (b.headers || b.query || b.webhookUrl || b.executionMode)) {
+            b = b.body;
+            continue;
+        }
+        // Envelopes genéricos de outros painéis.
+        let trocou = false;
+        for (const k of ['data', 'payload', 'json']) {
+            const v = b[k];
+            if (v && typeof v === 'object' && !Array.isArray(v) && (v.number || v.contact || v.message)) {
+                b = v; trocou = true; break;
+            }
+        }
+        if (trocou) continue;
+        break;
+    }
+    return b;
+}
+
 function parsePayload(body) {
     try {
         const normTipo = (t) => {
@@ -935,12 +978,22 @@ function parsePayload(body) {
             return v; // sticker/video/location → tratado como não-texto no /webhook
         };
 
+        // O ChatClean marca o tipo de evento. Só mensagem nova interessa: ack,
+        // atualização de ticket e afins não devem virar turno de conversa.
+        if (body?.event && body.event !== 'NewMessage') {
+            console.log(`⏭️ Evento "${body.event}" ignorado (só NewMessage vira conversa)`);
+            return null;
+        }
+
         // Formato ChatClean: contact + message aninhados.
         // O telefone real vem em message.raw.Info.SenderAlt (ex.: "558494610845@s.whatsapp.net").
         if (body?.contact || (body?.message && typeof body.message === 'object' && !body.message.add)) {
-            const contato = body.contact || {};
             const msg     = body.message || {};
+            // O contato pode vir na raiz (formato antigo) ou dentro do ticket,
+            // que é onde o webhook do ChatClean o coloca hoje.
+            const contato = body.contact || msg.ticket?.contact || {};
             if (msg.fromMe) return null; // ignora eco do próprio bot/atendente
+            if (msg.note === true) { console.log('📝 Nota interna ignorada'); return null; }
             if (IGNORAR_GRUPOS && ehGrupo(body, msg)) { console.log('👥 Mensagem de grupo ignorada'); return null; }
             if (!deveResponderTicket(body, msg)) { console.log(`⏭️ Ticket "${ticketStatus(body, msg)}" (aceito/atendido por humano) — IA não responde`); return null; }
             const senderAlt = msg.raw?.Info?.SenderAlt ? String(msg.raw.Info.SenderAlt).split('@')[0] : null;
@@ -1102,9 +1155,11 @@ async function handleApiMensagem(req, res) {
         });
     }
     try {
-        console.log('🔍 PAYLOAD RAW:', JSON.stringify(req.body, null, 2).slice(0, 4000));
+        const corpo = normalizarCorpo(req.body);
+        console.log('🔍 PAYLOAD RAW [' + (req.headers['content-type'] || 'sem content-type') + ']:',
+                    JSON.stringify(req.body, null, 2).slice(0, 4000));
 
-        const parsed = parsePayload(req.body);
+        const parsed = parsePayload(corpo);
         if (!parsed) return respIgnorado(res, 'payload não reconhecido ou mensagem descartada');
 
         console.log(`📩 ${parsed.chatId} [${parsed.tipo}]: "${parsed.texto || '[mídia]'}"`);
