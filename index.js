@@ -422,6 +422,34 @@ async function encaminhar(chatId, leadData, departamento, mensagemCliente, histo
 //  AGENDAMENTO (Google Calendar) — inerte se não configurado.
 //  Retorna true se já tratou o turno (o chamador deve dar return).
 // =============================================================
+// A falha do Google Calendar era SILENCIOSA: o bot caía no fluxo normal, parava
+// de agendar e ninguém ficava sabendo até alguém notar que não havia reunião
+// nova. O caso mais comum é `invalid_grant` — refresh token expirado, o que
+// acontece a cada 7 dias enquanto a tela de consentimento estiver em "Teste"
+// (ver GOOGLE_CALENDAR_SETUP.md). Aqui a equipe é avisada, no máximo uma vez a
+// cada AVISO_AGENDA_INTERVALO_MS, para não virar spam.
+const AVISO_AGENDA_INTERVALO_MS = 6 * 60 * 60 * 1000; // 6h
+let ultimoAvisoAgenda = 0;
+
+async function avisarFalhaDeAgenda(erro) {
+    const msg = erro && erro.message ? erro.message : String(erro);
+    console.error('❌ Erro ao consultar horários livres:', msg);
+
+    const ehAuth = /invalid_grant|invalid_client|unauthorized|401|403/i.test(msg);
+    const agora = Date.now();
+    if (!EQUIPE_NUMERO || agora - ultimoAvisoAgenda < AVISO_AGENDA_INTERVALO_MS) return;
+    ultimoAvisoAgenda = agora;
+
+    const detalhe = ehAuth
+        ? 'A autorização do Google expirou (invalid_grant). Rode "npm run gauth", atualize GOOGLE_REFRESH_TOKEN no EasyPanel e faça redeploy. Para não repetir, mude a tela de consentimento OAuth para "Em produção".'
+        : `Erro: ${msg}`;
+    try {
+        await ccPush(EQUIPE_NUMERO, {
+            body: `⚠️ A IA parou de agendar reuniões — o Google Calendar não respondeu.\n${detalhe}\nEnquanto isso os leads seguem sendo atendidos, mas NENHUMA reunião está sendo marcada.`
+        });
+    } catch (_) {}
+}
+
 async function tratarAgendamento(chatId, leadData, texto, extraido, exp) {
     if (!cal.configurado()) return false;
 
@@ -488,7 +516,7 @@ async function tratarAgendamento(chatId, leadData, texto, extraido, exp) {
     if (deveAgendar && !leadData.reuniaoAgendada) {
         let slots = [];
         try { slots = await cal.horariosLivres({ dias: 5, max: 3 }); }
-        catch (e) { console.error('❌ Erro ao consultar horários livres:', e.message); return false; }
+        catch (e) { await avisarFalhaDeAgenda(e); return false; }
         if (!slots.length) return false; // sem horários → fluxo normal (coleta preferência)
 
         leadData.slotsOferecidos = slots.map(s => ({ start: s.start, end: s.end, calendarId: s.calendarId, label: s.label }));
