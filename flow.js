@@ -7,19 +7,57 @@
 // Ordem oficial do fluxo (objetivo antes do nome, como o prompt-mestre)
 const CAMPOS = ['objetivo', 'nome', 'empresa', 'segmento', 'cidadeEstado', 'canais', 'volume', 'dor', 'urgencia', 'decisor'];
 
+const PERGUNTAS = {
+    objetivo:     'Pergunte, em uma frase, o que ele quer melhorar hoje: atendimento, organização ou vendas (passo 2).',
+    nome:         'Pergunte o nome dele (passo 3).',
+    empresa:      'Pergunte o nome da empresa dele.',
+    segmento:     'Pergunte em qual ramo/segmento a empresa atua.',
+    cidadeEstado: 'Pergunte de qual cidade e estado ele fala.',
+    canais:       'Pergunte quais canais ele usa hoje para atender (WhatsApp, Instagram, site, Telegram...).',
+    volume:       'Pergunte mais ou menos quantos atendimentos ele recebe por dia ou por mês.',
+    dor:          'Pergunte qual o maior desafio/dor que ele sente hoje no atendimento ou nas vendas.',
+    urgencia:     'Pergunte se ele quer resolver isso agora ou está se planejando para os próximos dias.',
+    decisor:      'Pergunte se ele decide sozinho ou tem mais alguém nesse processo.'
+};
+
+// Quantas vezes o bot insiste num campo antes de desistir dele.
+// Antes disto o funil TRAVAVA: o lead que se recusasse a informar a empresa
+// deixava o campo null para sempre, `qualificacaoCompleta` nunca virava true e
+// o passo 7 (encaminhar ao especialista) NUNCA disparava. O lead respondia
+// tudo o mais e mesmo assim não era passado ao comercial.
+const MAX_TENTATIVAS = 2;
+
+// Registra que o bot vai perguntar este campo AGORA. Precisa ser chamado uma
+// única vez por turno — por isso é separado de determinarProximoCampo, que é
+// consultado mais de uma vez no mesmo turno e não pode contar duas vezes.
+function registrarTentativa(leadData, campo) {
+    if (!campo) return;
+    leadData.tentativas = leadData.tentativas || {};
+    leadData.tentativas[campo] = (leadData.tentativas[campo] || 0) + 1;
+}
+
+// true se já insistimos o suficiente e o campo deve ser dado como recusado.
+function campoDesistido(leadData, campo, max = MAX_TENTATIVAS) {
+    const n = (leadData.tentativas && leadData.tentativas[campo]) || 0;
+    return n >= max;
+}
+
+// Campos que ficaram sem resposta depois de insistir. Vão para o resumo da
+// equipe como "não informado", em vez de sumirem em silêncio.
+function camposDesistidos(leadData, max = MAX_TENTATIVAS) {
+    return CAMPOS.filter((c) => !leadData[c] && campoDesistido(leadData, c, max));
+}
+
 // State machine: retorna o próximo campo a coletar (com a instrução p/ o modelo)
 // ou null quando a qualificação está completa (marca leadData.qualificacaoCompleta).
-function determinarProximoCampo(leadData) {
-    if (!leadData.objetivo)     return { campo: 'objetivo',     pergunta: 'Pergunte, em uma frase, o que ele quer melhorar hoje: atendimento, organização ou vendas (passo 2).' };
-    if (!leadData.nome)         return { campo: 'nome',         pergunta: 'Pergunte o nome dele (passo 3).' };
-    if (!leadData.empresa)      return { campo: 'empresa',      pergunta: 'Pergunte o nome da empresa dele.' };
-    if (!leadData.segmento)     return { campo: 'segmento',     pergunta: 'Pergunte em qual ramo/segmento a empresa atua.' };
-    if (!leadData.cidadeEstado) return { campo: 'cidadeEstado', pergunta: 'Pergunte de qual cidade e estado ele fala.' };
-    if (!leadData.canais)       return { campo: 'canais',       pergunta: 'Pergunte quais canais ele usa hoje para atender (WhatsApp, Instagram, site, Telegram...).' };
-    if (!leadData.volume)       return { campo: 'volume',       pergunta: 'Pergunte mais ou menos quantos atendimentos ele recebe por dia ou por mês.' };
-    if (!leadData.dor)          return { campo: 'dor',          pergunta: 'Pergunte qual o maior desafio/dor que ele sente hoje no atendimento ou nas vendas.' };
-    if (!leadData.urgencia)     return { campo: 'urgencia',     pergunta: 'Pergunte se ele quer resolver isso agora ou está se planejando para os próximos dias.' };
-    if (!leadData.decisor)      return { campo: 'decisor',      pergunta: 'Pergunte se ele decide sozinho ou tem mais alguém nesse processo.' };
+// Um campo já insistido MAX_TENTATIVAS vezes é pulado — o funil segue em frente.
+function determinarProximoCampo(leadData, opcoes = {}) {
+    const max = opcoes.maxTentativas || MAX_TENTATIVAS;
+    for (const campo of CAMPOS) {
+        if (leadData[campo]) continue;
+        if (campoDesistido(leadData, campo, max)) continue;
+        return { campo, pergunta: PERGUNTAS[campo] };
+    }
     leadData.qualificacaoCompleta = true;
     return null;
 }
@@ -73,4 +111,15 @@ function escolhaDeSlot(texto, extraido, nSlots) {
     return null;
 }
 
-module.exports = { CAMPOS, determinarProximoCampo, aplicarCampos, detectarSegmento, escolhaDeSlot };
+module.exports = {
+    CAMPOS,
+    PERGUNTAS,
+    MAX_TENTATIVAS,
+    determinarProximoCampo,
+    registrarTentativa,
+    campoDesistido,
+    camposDesistidos,
+    aplicarCampos,
+    detectarSegmento,
+    escolhaDeSlot
+};

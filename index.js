@@ -66,7 +66,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const { EMPRESA_INFO, SEGMENTOS, DEPARTAMENTOS } = require('./data');
 const { SYSTEM_SDR, promptExtracao, promptResposta } = require('./prompts');
-const { determinarProximoCampo, aplicarCampos, detectarSegmento, escolhaDeSlot } = require('./flow');
+const { determinarProximoCampo, aplicarCampos, detectarSegmento, escolhaDeSlot, registrarTentativa } = require('./flow');
 const { estaEmExpediente } = require('./horario');
 const cal = require('./calendar'); // Google Calendar (inerte se não configurado)
 const pipeline = require('./pipeline'); // Oportunidades no CRM (inerte se não configurado)
@@ -579,9 +579,29 @@ async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, 
 
             if (leadData.turnosTs.length > LOOP_MAX_TURNOS || repetida) {
                 if (!leadData.loopAvisado) {
-                    console.warn(`🔁 Possível loop/bot em ${chatId} (${leadData.turnosTs.length} msgs/${LOOP_JANELA_MS / 60000}min${repetida ? ', msg repetida' : ''}) — pausando respostas.`);
-                    if (EQUIPE_NUMERO) { try { await ccPush(EQUIPE_NUMERO, { body: `⚠️ Possível loop com outro bot/IA no contato ${chatId}. A IA pausou as respostas para não entrar em ping-pong. Verificar manualmente.` }); } catch (_) {} }
                     leadData.loopAvisado = true;
+                    console.warn(`🔁 Possível loop em ${chatId} (${leadData.turnosTs.length} msgs/${LOOP_JANELA_MS / 60000}min${repetida ? ', msg repetida' : ''}).`);
+
+                    // Repetir a MESMA mensagem quase sempre é gente, não bot: o
+                    // cliente não está sendo entendido e insiste. Emudecer aqui é
+                    // o pior desfecho possível — o ciclo vira "bot confunde ->
+                    // humano repete -> bot cala". Então transferimos para uma
+                    // pessoa em vez de sumir.
+                    if (repetida && !leadData.finalizado) {
+                        console.warn(`🙋 ${chatId} repetiu a mesma mensagem — transferindo para humano em vez de silenciar.`);
+                        try {
+                            const histLoop = leadData.conversationHistory.slice(-8).map(h => ({ role: h.role === 'user' ? 'user' : 'assistant', content: h.content }));
+                            if (!usuarioNoHistorico) leadData.conversationHistory.push({ role: 'user', content: texto });
+                            await encaminhar(chatId, leadData, DEPARTAMENTOS.comercial, texto, histLoop);
+                            return;
+                        } catch (e) {
+                            console.error('❌ Falha ao transferir por loop:', e.message);
+                        }
+                    }
+
+                    // Volume alto sem repetição: mais provável ping-pong com outro
+                    // bot. Aqui pausar É o certo — mas a equipe precisa saber.
+                    if (EQUIPE_NUMERO) { try { await ccPush(EQUIPE_NUMERO, { body: `⚠️ Possível loop com outro bot/IA no contato ${chatId}. A IA pausou as respostas para não entrar em ping-pong. Verificar manualmente.` }); } catch (_) {} }
                 }
                 return; // não responde — corta o loop
             }
@@ -746,6 +766,10 @@ async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, 
 
         // --- Próximo passo + resposta ---
         const proximoCampoDepois = determinarProximoCampo(leadData);
+        // Conta a insistencia UMA vez por turno. Depois de MAX_TENTATIVAS o
+        // campo e dado por recusado e o funil segue — sem isso, um lead que se
+        // negasse a informar a empresa nunca chegava ao encaminhamento.
+        registrarTentativa(leadData, proximoCampoDepois && proximoCampoDepois.campo);
 
         // Sub-fluxo de agendamento (Google Calendar). Inerte se não configurado;
         // se tratou o turno (ofereceu horários ou agendou), encerra aqui.

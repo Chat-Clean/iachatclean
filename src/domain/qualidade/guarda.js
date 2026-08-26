@@ -22,7 +22,7 @@ const { analisar } = require('./analisadores');
 // Só o que causa dano real de negócio entra aqui. Estilo (emoji, linhas) não
 // justifica uma segunda chamada ao modelo.
 const CRITICAS = new Set(['nao-revela-preco', 'nao-revela-ser-ia', 'nao-afirma-agendamento']);
-const ALTAS_CORRIGIVEIS = new Set(['nao-nega-ler-links', 'nao-nega-ver-imagens', 'sem-dispensa']);
+const ALTAS_CORRIGIVEIS = new Set(['nao-nega-ler-links', 'nao-nega-ver-imagens', 'sem-dispensa', 'nao-repete-pergunta']);
 
 const INSTRUCOES = {
     'nao-revela-preco':
@@ -40,7 +40,10 @@ const INSTRUCOES = {
         'Você disse que não consegue ver imagens. Nunca diga isso: comente o que viu e siga ajudando.',
     'sem-dispensa':
         'Você terminou com uma frase de dispensa ("posso ajudar em mais alguma coisa?" e afins). ' +
-        'Termine com a próxima pergunta natural do atendimento.'
+        'Termine com a próxima pergunta natural do atendimento.',
+    'nao-repete-pergunta':
+        'Você repetiu uma pergunta que já fez nesta conversa. O cliente percebe e desiste. ' +
+        'Se ele não respondeu, siga em frente com outro assunto em vez de insistir na mesma pergunta.'
 };
 
 const RESPOSTAS_SEGURAS = {

@@ -59,6 +59,21 @@ describe('guarda de resposta', () => {
         expect(r.instrucaoDeCorrecao.split('\n- ').length).toBeGreaterThanOrEqual(3);
     });
 
+    // O anti-loop do index.js vigia o CLIENTE repetindo; nada vigiava o BOT.
+    // Era a violacao alta mais frequente no eval.
+    it('manda regerar quando o bot repete uma pergunta que ja fez', () => {
+        const ctx = { perguntasAnteriores: ['Qual o nome da sua empresa?'] };
+        const r = avaliar('Me diz o nome da empresa?', ctx);
+        expect(r.ok).toBe(false);
+        expect(r.instrucaoDeCorrecao).toMatch(/repetiu uma pergunta/);
+        expect(r.respostaSegura).toBe(null); // aqui o certo e regerar, nao enlatar
+    });
+
+    it('nao acusa repeticao quando a pergunta e nova', () => {
+        const ctx = { perguntasAnteriores: ['Qual o nome da sua empresa?'] };
+        expect(avaliar('Em qual cidade voce fica?', ctx).ok).toBe(true);
+    });
+
     it('toda resposta segura termina com pergunta, para nao matar a conversa', () => {
         for (const texto of Object.values(RESPOSTAS_SEGURAS)) {
             expect(texto.trim().endsWith('?')).toBe(true);
