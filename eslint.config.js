@@ -39,7 +39,13 @@ module.exports = [
             globals: { ...globals.node }
         },
         rules: {
-            'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrors: 'none' }],
+            // '_algo' marca descarte deliberado (ex.: tirar um campo por rest).
+            'no-unused-vars': [
+                'error',
+                { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrors: 'none' }
+            ],
+            // catch (_) {} vazio e o idioma do legado para "falha aqui nao importa".
+            'no-empty': ['error', { allowEmptyCatch: true }],
             'no-console': 'off',
             eqeqeq: ['error', 'smart'],
             'prefer-const': 'error',

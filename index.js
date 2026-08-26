@@ -1,8 +1,6 @@
 require('dotenv').config();
 const express = require('express');
 const OpenAI = require('openai');
-const fs = require('fs');
-const path = require('path');
 const axios = require('axios');
 const FormData = require('form-data');
 const crypto = require('crypto');
@@ -80,7 +78,6 @@ const processandoMensagem = new Map(); // lock de processamento (por instância)
 const telefone = require('./src/shared/telefone');
 
 const normalizarPhone = telefone.normalizarPhone;
-const nucleoNumero = telefone.nucleoNumero;
 const contatoPermitido = (numero) => telefone.contatoPermitido(numero, IA_ALLOWED_CONTACTS);
 
 // =============================================================
@@ -674,7 +671,6 @@ async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, 
 
             // Cliente ATUAL pedindo suporte → encaminha para Suporte/CS (não é lead novo)
             if (extraido.tipoContato === 'cliente' && !leadData.finalizado) {
-                const hist = leadData.conversationHistory.slice(-8).map(h => ({ role: h.role === 'user' ? 'user' : 'assistant', content: h.content }));
                 if (!usuarioNoHistorico) leadData.conversationHistory.push({ role: 'user', content: texto });
                 await enviarMensagem(chatId, 'Entendi! Vou te encaminhar pro nosso time de Suporte, que já cuida disso com você 😊');
                 await notificarEquipe(leadData, chatId, { departamento: DEPARTAMENTOS.suporte, tagExtra: 'CLIENTE ATUAL' });
