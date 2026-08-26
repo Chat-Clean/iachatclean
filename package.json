@@ -16,7 +16,8 @@
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{js,json,md}\"",
     "format:check": "prettier --check \"**/*.{js,json,md}\"",
-    "typecheck": "tsc -p jsconfig.json --noEmit"
+    "typecheck": "tsc -p jsconfig.json --noEmit",
+    "eval": "node eval.js"
   },
   "keywords": [
     "whatsapp",

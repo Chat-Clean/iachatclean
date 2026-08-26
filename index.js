@@ -54,6 +54,11 @@ const LOOP_JANELA_MS  = parseInt(process.env.LOOP_JANELA_MIN || '3', 10) * 60 * 
 // No WhatsApp o cliente costuma mandar várias mensagens seguidas; juntamos tudo
 // num único turno em vez de responder só a primeira e ignorar o resto.
 const AGRUPAR_MS     = parseInt(process.env.AGRUPAR_MENSAGENS_MS || '2000', 10);
+// Modelos da OpenAI por tarefa. Estavam fixos no meio do codigo, em quatro
+// lugares diferentes; agora sao uma decisao de configuracao.
+const MODELO_RESPOSTA  = process.env.MODELO_RESPOSTA  || 'gpt-4o-mini';
+const MODELO_EXTRACAO  = process.env.MODELO_EXTRACAO  || 'gpt-4o-mini';
+const MODELO_VISAO     = process.env.MODELO_VISAO     || 'gpt-4o';
 // Reinicia o atendimento após N horas sem interação do cliente (padrão: 24h).
 const RESET_INATIVIDADE = parseInt(process.env.RESET_INATIVIDADE_HORAS || '24', 10) * 3600 * 1000;
 
@@ -251,7 +256,7 @@ async function extrairInformacoesComIA(mensagem, campoAtual, historicoRecente = 
         const mensagemSanitizada = mensagem.replace(/[<>]/g, '').substring(0, 1000);
         const prompt = promptExtracao({ mensagemSanitizada, campoAtual });
         const completion = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
+            model: MODELO_EXTRACAO,
             messages: [...historicoRecente, { role: 'user', content: prompt }],
             temperature: 0,
             response_format: { type: 'json_object' } // garante JSON válido (o prompt já pede JSON)
@@ -268,20 +273,72 @@ async function extrairInformacoesComIA(mensagem, campoAtual, historicoRecente = 
 // =============================================================
 //  IA — GERAÇÃO DE RESPOSTA (gpt-4o-mini, temperatura 0.7)
 // =============================================================
+// Contexto que os analisadores precisam para as regras que dependem do
+// historico (nome repetido, pergunta repetida).
+function contextoDeQualidade(leadData) {
+    const primeiroNome = (leadData.nome || '').split(' ')[0];
+    const respostasAnteriores = (leadData.conversationHistory || []).filter((h) => h.role === 'assistant');
+    const ultima = respostasAnteriores[respostasAnteriores.length - 1];
+    return {
+        primeiroNome,
+        usouNomeNaAnterior: Boolean(
+            ultima && primeiroNome.length > 1 && String(ultima.content).toLowerCase().includes(primeiroNome.toLowerCase())
+        ),
+        perguntasAnteriores: respostasAnteriores
+            .map((h) => extrairPergunta(h.content))
+            .filter(Boolean)
+    };
+}
+
 async function gerarRespostaIA(leadData, mensagemCliente, proximoCampo, historicoRecente = [], expediente = null) {
     const mensagemSanitizada = mensagemCliente.replace(/[<>]/g, '').substring(0, 1000);
     const isInicioConversa = leadData.conversationHistory.length === 0;
     const prompt = promptResposta({ isInicioConversa, mensagemSanitizada, proximoCampo, leadData, expediente });
-    const completion = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [
-            { role: 'system', content: SYSTEM_SDR },
-            ...historicoRecente,
-            { role: 'user', content: prompt }
-        ],
-        temperature: 0.7
-    });
-    return completion.choices[0].message.content.trim();
+    const mensagens = [
+        { role: 'system', content: SYSTEM_SDR },
+        ...historicoRecente,
+        { role: 'user', content: prompt }
+    ];
+
+    const pedir = async (extra) => {
+        const completion = await openai.chat.completions.create({
+            model: MODELO_RESPOSTA,
+            messages: extra ? [...mensagens, { role: 'user', content: extra }] : mensagens,
+            temperature: 0.7
+        });
+        return completion.choices[0].message.content.trim();
+    };
+
+    let resposta = await pedir(null);
+
+    // GUARDA: instrucao em linguagem natural e probabilistica; invariante de
+    // negocio nao pode ser. Medido pelo eval, o modelo inventou faixa de preco
+    // em 2 de 6 turnos do roteiro de pressao de preco, apesar de o prompt
+    // proibir. Aqui a violacao critica vira uma segunda tentativa dirigida e,
+    // se ela tambem falhar, uma resposta enlatada que nunca quebra a regra.
+    const ctx = contextoDeQualidade(leadData);
+    const veredito = guarda.avaliar(resposta, ctx);
+    if (!veredito.ok) {
+        const ids = veredito.corrigiveis.map((v) => v.id).join(', ');
+        console.warn(`🛡️ Resposta violou [${ids}] — regerando.`);
+        try {
+            const segunda = await pedir(veredito.instrucaoDeCorrecao);
+            const vereditoSegunda = guarda.avaliar(segunda, ctx);
+            if (vereditoSegunda.ok) {
+                resposta = segunda;
+            } else if (vereditoSegunda.respostaSegura) {
+                console.warn('🛡️ Segunda tentativa também violou — usando resposta segura.');
+                resposta = vereditoSegunda.respostaSegura;
+            } else {
+                resposta = segunda; // violação alta remanescente: melhor que a primeira
+            }
+        } catch (e) {
+            console.error('🛡️ Falha ao regerar:', e.message);
+            if (veredito.respostaSegura) resposta = veredito.respostaSegura;
+        }
+    }
+
+    return resposta;
 }
 
 // A IA "enxerga" a imagem enviada pelo cliente (gpt-4o com visão) e descreve
@@ -295,7 +352,7 @@ async function analisarImagem(mediaUrl) {
 - Se for logo, foto da empresa, produto ou documento, diga o que é.
 Não invente o que não dá pra ver.`;
         const completion = await openai.chat.completions.create({
-            model: 'gpt-4o',
+            model: MODELO_VISAO,
             messages: [{
                 role: 'user',
                 content: [
@@ -324,7 +381,7 @@ Responda de forma breve, calorosa e útil (registro de WhatsApp, sem markdown, n
 - Se depender do especialista (preço, proposta, detalhes de contrato), diga que ele já vai falar com o cliente pra resolver.
 Nunca passe preço. Não refaça perguntas de qualificação e não repita o resumo.`;
         const completion = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
+            model: MODELO_RESPOSTA,
             messages: [
                 { role: 'system', content: 'Você é o SDR virtual da ChatClean. Escrita natural, curta, registro de WhatsApp.' },
                 ...historicoRecente,
@@ -877,6 +934,8 @@ function agruparEProcessar(parsed) {
 //  generico para qualquer causa.
 // =============================================================
 const acl = require('./src/infrastructure/chatclean/acl/tradutor');
+const guarda = require('./src/domain/qualidade/guarda');
+const { extrairPergunta } = require('./src/domain/qualidade/analisadores');
 const { MOTIVOS } = require('./src/domain/mensageria/MotivoDeDescarte');
 
 const normalizarCorpo = acl.normalizarCorpo;
