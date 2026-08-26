@@ -21,10 +21,13 @@ const grade = require('./src/domain/agendamento/GradeDeHorarios');
 const TZ = 'America/Recife'; // Natal-RN, UTC-3 fixo (sem horário de verão)
 const OFFSET = '-03:00';
 // Janela de AGENDAMENTO (horários de reunião oferecidos). Configurável via env
-// AGENDA_INICIO / AGENDA_FIM no formato "HH:MM". Padrão: 10:00 às 17:00.
+// AGENDA_INICIO / AGENDA_FIM no formato "HH:MM".
+// Padrão: primeira reunião às 10:00, última COMEÇANDO às 16:40.
+// ATENÇÃO: AGENDA_FIM é quando a reunião precisa TERMINAR, não quando ela pode
+// começar. Para que 16:40 seja oferecido com duração de 40 min, o fim é 17:20.
 const parseHHMM = grade.parseHHMM;
-const INICIO_MIN = parseHHMM(process.env.AGENDA_INICIO, 10 * 60); // 10:00
-const FIM_MIN    = parseHHMM(process.env.AGENDA_FIM, 17 * 60);    // 17:00
+const INICIO_MIN = parseHHMM(process.env.AGENDA_INICIO, 10 * 60);      // 10:00
+const FIM_MIN    = parseHHMM(process.env.AGENDA_FIM, 17 * 60 + 20);    // 17:20 (última às 16:40)
 // Horário de almoço — não oferece reuniões que caiam nessa janela.
 // Configurável via ALMOCO_INICIO/ALMOCO_FIM ("HH:MM"). Padrão: 12:30 às 13:30.
 // Para desativar, use valores iguais (ex.: ALMOCO_INICIO=ALMOCO_FIM=00:00).
@@ -189,4 +192,17 @@ function diag() {
     };
 }
 
-module.exports = { configurado, horariosLivres, agendarReuniao, cancelarReuniao, rotuloSlot, diag, DURACAO_MIN, TZ };
+module.exports = {
+    configurado,
+    horariosLivres,
+    agendarReuniao,
+    cancelarReuniao,
+    rotuloSlot,
+    diag,
+    // Exportado para teste: é aqui que moram as três regras que o negócio
+    // definiu (sem fim de semana, janela do dia, almoço bloqueado). Testar a
+    // função real evita que o teste valide uma cópia da lógica.
+    gerarCandidatos,
+    DURACAO_MIN,
+    TZ
+};

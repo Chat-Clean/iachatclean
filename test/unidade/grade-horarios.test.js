@@ -7,9 +7,11 @@ const g = require('../../src/domain/agendamento/GradeDeHorarios.js');
 const H = (hhmm) => g.parseHHMM(hhmm, -1);
 const hhmm = (mins) => mins.map(g.formatarHHMM);
 
+// Espelha a configuração de produção: primeira reunião às 10:00, última
+// COMEÇANDO às 16:40 (por isso o fim da janela é 17:20, não 17:00).
 const base = {
     inicioMin: H('10:00'),
-    fimMin: H('17:00'),
+    fimMin: H('17:20'),
     duracaoMin: 40,
     almocoIni: H('12:30'),
     almocoFim: H('13:30')
@@ -51,13 +53,19 @@ describe('grade pedida: reunioes de 40 min a partir das 10h', () => {
             '14:00',
             '14:40',
             '15:20',
-            '16:00'
+            '16:00',
+            '16:40'
         ]);
+    });
+
+    it('a ultima reuniao comeca as 16:40', () => {
+        const m = g.gerarMinutosDoDia(base);
+        expect(g.formatarHHMM(m[m.length - 1])).toBe('16:40');
     });
 
     it('nenhuma reuniao termina depois do fim da janela', () => {
         for (const m of g.gerarMinutosDoDia(base)) {
-            expect(m + 40).toBeLessThanOrEqual(H('17:00'));
+            expect(m + 40).toBeLessThanOrEqual(H('17:20'));
         }
     });
 
@@ -91,7 +99,11 @@ describe('o bug do passo', () => {
 
 describe('bordas', () => {
     it('devolve vazio quando a janela nao cabe uma reuniao', () => {
-        expect(g.gerarMinutosDoDia({ ...base, inicioMin: H('16:40') })).toEqual([]);
+        expect(g.gerarMinutosDoDia({ ...base, inicioMin: H('16:45') })).toEqual([]);
+    });
+
+    it('16:40 cabe exatamente na borda, sem estourar', () => {
+        expect(hhmm(g.gerarMinutosDoDia({ ...base, inicioMin: H('16:40') }))).toEqual(['16:40']);
     });
 
     it('devolve vazio com duracao invalida', () => {
