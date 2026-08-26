@@ -728,11 +728,22 @@ async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, 
         // Sinais transitórios (valem só para esta resposta)
         leadData.objecaoAtiva = null;
         leadData.perguntouAgora = null;
+        leadData.naoEntendeuAgora = null;
 
         if (extraido) {
             aplicarCampos(leadData, extraido);
             if (extraido.objecao) leadData.objecaoAtiva = extraido.objecao;
             if (extraido.perguntou) leadData.perguntouAgora = true;
+            // Ruido na comunicacao: o cliente disse que nao entendeu, que foi mal
+            // interpretado ou que a pergunta ja tinha sido feita. Um sinal manda
+            // reformular; dois seguidos significam que a IA nao vai desatar o no
+            // sozinha, e insistir so queima o lead.
+            if (extraido.naoEntendeu) {
+                leadData.naoEntendeuAgora = true;
+                leadData.naoEntendeuSeguidos = (leadData.naoEntendeuSeguidos || 0) + 1;
+            } else {
+                leadData.naoEntendeuSeguidos = 0;
+            }
             if (extraido.horarioPreferido && !leadData.horarioPreferido) leadData.horarioPreferido = extraido.horarioPreferido;
             if (extraido.tipoContato) leadData.tipoContato = extraido.tipoContato;
 
@@ -752,6 +763,15 @@ async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, 
                 await enviarMensagem(chatId, 'Entendi! Vou te encaminhar pro nosso time de Suporte, que já cuida disso com você 😊');
                 await notificarEquipe(leadData, chatId, { departamento: DEPARTAMENTOS.suporte, tagExtra: 'CLIENTE ATUAL' });
                 leadData.finalizado = true;
+                return;
+            }
+
+            // Dois sinais seguidos de incompreensão → passa para uma pessoa.
+            if (leadData.naoEntendeuSeguidos >= 2 && !leadData.finalizado) {
+                console.warn(`🤝 ${chatId} sinalizou incompreensão 2x seguidas — transferindo para humano.`);
+                const histRuido = leadData.conversationHistory.slice(-8).map(h => ({ role: h.role === 'user' ? 'user' : 'assistant', content: h.content }));
+                if (!usuarioNoHistorico) leadData.conversationHistory.push({ role: 'user', content: texto });
+                await encaminhar(chatId, leadData, DEPARTAMENTOS.comercial, texto, histRuido, exp);
                 return;
             }
 
@@ -793,6 +813,7 @@ async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, 
 
         leadData.objecaoAtiva = null;    // consumidos
         leadData.perguntouAgora = null;
+        leadData.naoEntendeuAgora = null;
         leadData.analiseImagem = null;
 
         await enviarMensagensQuebradas(chatId, resposta);

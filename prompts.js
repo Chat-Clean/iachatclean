@@ -103,6 +103,7 @@ CAMPOS PARA EXTRAIR (retorne null quando o cliente não informou):
 - decisor: "sozinho" se ele decide sozinho, "compartilhado" se tem sócio/gestor/mais alguém no processo.
 - tipoContato: "lead" se é um provável cliente novo interessado na ChatClean, "cliente" se já é cliente atual pedindo suporte/tirando dúvida de uso, "outros" caso contrário.
 - querFalarComHumano: true se pedir explicitamente para falar com uma pessoa/atendente/especialista.
+- naoEntendeu: true se o cliente sinalizar RUÍDO NA COMUNICAÇÃO — que não entendeu a pergunta, que foi mal interpretado, que você já perguntou aquilo, ou que não foi isso que ele perguntou (ex.: "não entendi", "como assim?", "não foi isso que eu perguntei", "você já me perguntou isso", "eu já respondi isso"). NÃO marque para discordância comum nem para objeção de preço.
 - perguntou: true se o cliente FEZ uma pergunta ou pediu uma informação (ex.: sobre API oficial, Instagram, integrações, suporte, funcionamento) que precisa ser respondida antes de seguir o roteiro.
 - horarioPreferido: se o cliente indicar um dia/horário de preferência para uma reunião ou retorno (ex.: "segunda de manhã", "terça às 15h", "pode ser depois das 14h", "no começo da tarde"), retorne como ele disse. Senão null.
 - querAgendar: true SOMENTE se o cliente pedir EXPLICITAMENTE para marcar/agendar uma reunião, call, demonstração ou horário (ex.: "podemos marcar uma reunião?", "quero agendar uma call", "dá pra marcar um horário?", "bora marcar uma demo"). NÃO marque para frases que apenas descrevem o problema, a urgência ou a vontade de resolver ("quero resolver isso agora", "preciso disso urgente", "perco lead à noite") — nesses casos, querAgendar=false.
@@ -163,17 +164,25 @@ function promptResposta({ isInicioConversa, mensagemSanitizada, proximoCampo, le
             ? (exp.aberto ? fechamentoAberto : fechamentoPlantao)
             : '- Responda ao que o cliente disse com naturalidade.');
 
+    // O handoff NAO pode ser engolido por uma pergunta do cliente. Antes disto,
+    // se a ultima fala fosse uma pergunta, a linha de encaminhamento era
+    // descartada: o sistema marcava o lead como finalizado e avisava a equipe,
+    // mas o cliente nunca ouvia que alguem ia assumir. Agora responde a duvida
+    // E anuncia a passagem.
+    const ehHandoff = !proximoCampo && leadData.qualificacaoCompleta;
+
     return `CONTEXTO DESTA MENSAGEM (estado atual do atendimento — não é regra, é só o que já sabemos):
 - O cliente acabou de dizer: "${mensagemSanitizada}"
 ${leadData.analiseImagem ? '- O cliente ENVIOU UMA IMAGEM e você CONSEGUIU vê-la. Conteúdo: ' + leadData.analiseImagem + '\n  Comente de forma natural e útil o que viu (ex.: se for um print de conversa, reconheça do que se trata) e siga ajudando/qualificando. NUNCA diga que não consegue ver ou abrir imagens.' : ''}
 ${isInicioConversa ? '- Esta é a PRIMEIRA mensagem: acolha (passo 1) e pergunte como pode ajudar. Uma coisa de cada vez.' : ''}
 ${leadData.aguardandoEscolhaSlot ? '- Você JÁ ofereceu horários NUMERADOS de reunião e está aguardando o cliente escolher. Responda o que ele trouxe (dúvida etc.) e, ao final, peça gentilmente que ele escolha um dos horários pelo NÚMERO. NUNCA diga que a reunião está marcada/agendada — quem confirma é o sistema, só depois que ele escolher o número.' : ''}
 ${perguntou
-    ? '- O CLIENTE FEZ UMA PERGUNTA. Responda a dúvida dele de forma completa e natural, usando o conhecimento do sistema (API oficial, Instagram, integrações, suporte etc.). NESTA resposta, NÃO faça a próxima pergunta do fluxo e NÃO repita perguntas que você já fez — deixe a conversa fluir e retome a qualificação quando ele terminar de perguntar.'
+    ? '- O CLIENTE FEZ UMA PERGUNTA. Responda a dúvida dele de forma completa e natural, usando o conhecimento do sistema (API oficial, Instagram, integrações, suporte etc.). NESTA resposta, NÃO faça a próxima pergunta do fluxo e NÃO repita perguntas que você já fez — deixe a conversa fluir e retome a qualificação quando ele terminar de perguntar.' + (ehHandoff ? '\n' + linhaPasso : '')
     : linhaPasso}
 - Dados já coletados (NÃO pergunte de novo): ${coletados}
 ${seg ? '- O cliente é do segmento ' + seg.nome + '. Se fizer sentido, conecte com: ' + seg.gancho : ''}
 ${objecaoAtiva ? '- O cliente trouxe uma objeção. Contorne com naturalidade, SEM revelar preço: ' + objecaoAtiva : ''}
+${leadData.naoEntendeuAgora ? '- ATENÇÃO: o cliente sinalizou que NÃO ENTENDEU ou que foi mal interpretado. NÃO repita a mesma pergunta com outras palavras — isso é o que mais faz o cliente desistir. Reconheça em poucas palavras, e então REFORMULE de forma mais simples e concreta, ou responda diretamente o que ele parece estar querendo saber.' : ''}
 ${usouNomeRecente ? '- IMPORTANTE: você JÁ chamou o cliente pelo nome nas mensagens recentes. NÃO use o nome dele nesta resposta.' : ''}
 
 Escreva UMA única mensagem de WhatsApp, curta (máx. 2 linhas), seguindo todas as regras do sistema. Não escreva rótulos nem coloque o próximo passo entre colchetes.`;
