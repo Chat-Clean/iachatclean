@@ -33,8 +33,9 @@ reconhecido".
 
 ## Próximo passo
 
-**Decisao pendente do negocio:** promover `MODELO_RESPOSTA=gpt-4.1-mini` em producao. Medido:
-zero violacoes criticas contra duas do modelo atual. Ver [12-qualidade-da-ia.md](12-qualidade-da-ia.md).
+**Decisao pendente do negocio:** promover `MODELO_RESPOSTA=gpt-4.1-mini` em producao. Medido em 5
+execucoes do roteiro de preco: 0 vazamentos contra 2 em 30 turnos do modelo atual. A guarda ja
+cobre o caso; a troca reduz a frequencia. Ver [12-qualidade-da-ia.md](12-qualidade-da-ia.md).
 
 **Fase 2.1 — porta `CanalDeMensagem`.** É a próxima porque `ccPush` hoje mistura três destinos
 (lead, nota interna no ticket, equipe) e a captura do modo síncrono é um `if` dentro do adapter.
@@ -61,6 +62,7 @@ Ordem: teste de caracterização de `ccPush` -> porta + fake -> adapter real -> 
 | D-05 | `prints/image.png` foi versionado. | Cosmético. |
 | D-06 | `test-chat.js` e `sim-lead.js` reimplementam o turno e ja divergiram: nao tem a guarda. O comentario no topo deles afirma usar "o MESMO cerebro". | Testar no terminal nao reproduz producao. Fase 6. |
 | D-07 | O eval mede obediencia as regras, nao se a resposta e boa. | Um juiz LLM sobre os mesmos roteiros cobriria. |
+| D-09 | Com `temperature: 0.7` o placar varia entre execucoes. So a medicao de vazamento de preco foi repetida (5x). | Numero de execucao unica e anedota, nao estatistica. |
 | D-08 | `MODELO_RESPOSTA` no `.env.example` sugere `gpt-4.1-mini`, mas o padrao no codigo continua `gpt-4o-mini` para nao mudar producao sem decisao. | Producao segue no modelo que inventa preco, protegida so pela guarda. |
 
 ## Como validar que nada quebrou

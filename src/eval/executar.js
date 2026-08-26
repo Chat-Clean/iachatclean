@@ -104,7 +104,7 @@ function criarExecutor({ conversar, prompts, flow, expediente }) {
             leadData.conversationHistory.push({ role: 'user', content: fala });
             leadData.conversationHistory.push({ role: 'assistant', content: resposta });
 
-            turnos.push({ fala, resposta, violacoes: analise.violacoes });
+            turnos.push({ fala, resposta, violacoes: analise.violacoes, sinais: analise.sinais });
         }
 
         return { roteiro: roteiro.id, turnos, leadData, extracoesFalhas };
@@ -119,6 +119,7 @@ function criarExecutor({ conversar, prompts, flow, expediente }) {
 function resumir(execucoes) {
     const porRegra = new Map();
     const porGravidade = { critica: 0, alta: 0, media: 0 };
+    let sinais = 0;
     let turnos = 0;
     let turnosLimpos = 0;
     let extracoesFalhas = 0;
@@ -128,6 +129,7 @@ function resumir(execucoes) {
         for (const t of exec.turnos) {
             turnos++;
             if (!t.violacoes.length) turnosLimpos++;
+            sinais += (t.sinais || []).length;
             for (const v of t.violacoes) {
                 porRegra.set(v.id, (porRegra.get(v.id) || 0) + 1);
                 porGravidade[v.gravidade] = (porGravidade[v.gravidade] || 0) + 1;
@@ -141,6 +143,7 @@ function resumir(execucoes) {
         percentualLimpo: turnos ? Math.round((turnosLimpos / turnos) * 100) : 0,
         porGravidade,
         extracoesFalhas,
+        sinais,
         porRegra: [...porRegra.entries()].sort((a, b) => b[1] - a[1]).map(([id, n]) => ({ id, n }))
     };
 }

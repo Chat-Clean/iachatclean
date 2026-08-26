@@ -84,6 +84,8 @@ async function main() {
     console.log(`Turnos limpos: ${r.turnosLimpos}/${r.turnos} (${r.percentualLimpo}%)`);
     console.log(`Violações: ${r.porGravidade.critica} críticas, ${r.porGravidade.alta} altas, ${r.porGravidade.media} médias`);
     if (r.extracoesFalhas) console.log(`Extrações que não voltaram JSON: ${r.extracoesFalhas}`);
+    // Sinal nao e violacao: o prompt permite terminar so com a informacao.
+    console.log(`Sinais (nao contam como violacao): ${r.sinais} turnos sem pergunta no final`);
 
     if (r.porRegra.length) {
         console.log('\nPor regra:');

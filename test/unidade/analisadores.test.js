@@ -46,9 +46,15 @@ describe('experiencia', () => {
         expect(ok(a.naoSeDespede, 'Até mais!')).toBe(false);
     });
 
-    it('cobra pergunta no final', () => {
+    // SINAL, nao violacao: o prompt permite terminar so com a informacao.
+    it('mede se terminou com pergunta, sem tratar como violacao', () => {
         expect(ok(a.terminaComPergunta, 'Show! Qual seu segmento?')).toBe(true);
         expect(ok(a.terminaComPergunta, 'Entendi, obrigado.')).toBe(false);
+        expect(a.terminaComPergunta('Entendi, obrigado.').gravidade).toBe('info');
+        // Nao pode contaminar o placar de violacoes.
+        const r = a.analisar('Entendi, obrigado.');
+        expect(r.ok).toBe(true);
+        expect(r.sinais.map((s) => s.id)).toContain('termina-com-pergunta');
     });
 });
 
@@ -140,7 +146,7 @@ describe('analisar (execucao completa)', () => {
     it('todo resultado traz id e gravidade', () => {
         for (const res of a.analisar('Qual seu nome?').resultados) {
             expect(res.id).toBeTruthy();
-            expect(['critica', 'alta', 'media']).toContain(res.gravidade);
+            expect(['critica', 'alta', 'media', 'info']).toContain(res.gravidade);
         }
     });
 });

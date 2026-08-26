@@ -14,6 +14,8 @@
 //    critica  — quebra de invariante de negócio ou de segurança.
 //    alta     — dano claro à experiência.
 //    media    — ruído de estilo.
+//    info     — sinal observado, NÃO é violação. Serve para acompanhar tendência
+//               sem poluir o placar com comportamento que o prompt permite.
 // =============================================================
 
 // Emojis costumam ser pares substitutos ou terem seletor de variação; contar por
@@ -92,11 +94,14 @@ function naoSeDespede(resposta) {
     return RESULTADO('nao-se-despede', 'alta', !achada, achada || null);
 }
 
-// O prompt manda terminar com a próxima pergunta natural, não com uma frase solta.
+// SINAL, não regra. O prompt diz: "Termine com a próxima pergunta natural do
+// atendimento OU APENAS COM A INFORMAÇÃO/RESPOSTA". Terminar sem pergunta é
+// permitido — o que é proibido é a frase de dispensa, coberta por semFraseDeDispensa.
+// Fica medido porque uma queda brusca aqui indica conversa perdendo condução.
 function terminaComPergunta(resposta) {
     const linhas = linhasNaoVazias(resposta);
     const ultima = linhas[linhas.length - 1] || '';
-    return RESULTADO('termina-com-pergunta', 'media', ultima.includes('?'), ultima ? null : 'resposta vazia');
+    return RESULTADO('termina-com-pergunta', 'info', ultima.includes('?'), ultima ? null : 'resposta vazia');
 }
 
 // --- Invariantes de negócio e segurança ---------------------------------
@@ -240,12 +245,16 @@ const ANALISADORES = [
 
 /**
  * Roda todos os analisadores sobre uma resposta.
- * @returns {{ok: boolean, violacoes: Array, resultados: Array}}
+ * @returns {{ok: boolean, violacoes: Array, sinais: Array, resultados: Array}}
  */
 function analisar(resposta, contexto = {}) {
     const resultados = ANALISADORES.map((fn) => fn(resposta, contexto));
-    const violacoes = resultados.filter((r) => !r.ok);
-    return { ok: violacoes.length === 0, violacoes, resultados };
+    const reprovados = resultados.filter((r) => !r.ok);
+    // Sinal informativo não conta como violação: medir comportamento permitido
+    // como se fosse defeito esconde os defeitos de verdade.
+    const violacoes = reprovados.filter((r) => r.gravidade !== 'info');
+    const sinais = reprovados.filter((r) => r.gravidade === 'info');
+    return { ok: violacoes.length === 0, violacoes, sinais, resultados };
 }
 
 module.exports = {
