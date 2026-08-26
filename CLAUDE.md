@@ -42,7 +42,7 @@ coisa.
 | **Retomar o trabalho** | [docs/13-estado-e-continuacao.md](docs/13-estado-e-continuacao.md) |
 | Arquitetura alvo | [docs/10-arquitetura-alvo.md](docs/10-arquitetura-alvo.md) |
 | **Plano de refatoração** | [docs/11-plano-refatoracao-strangler.md](docs/11-plano-refatoracao-strangler.md) |
-| Contrato da API de entrada | [docs/06-integracoes.md](docs/06-integracoes.md) |
+| **Qualidade da IA e evals** | [docs/12-qualidade-da-ia.md](docs/12-qualidade-da-ia.md) |
 
 ## Convenções
 
@@ -82,6 +82,7 @@ npm test           # suíte vitest (sem rede, sem crédito)
 npm run coverage   # cobertura
 npm run lint       # inclui a barreira de camadas
 npm run typecheck  # checkJs sobre domain/application/shared
+npm run eval       # mede a qualidade das respostas — GASTA CREDITO
 ```
 
 ## Cuidados operacionais

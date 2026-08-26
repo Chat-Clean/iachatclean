@@ -22,6 +22,9 @@ npm run typecheck  limpo
 | Bloqueio de rede na suíte | `test/apoio/setup.js` |
 | Value objects de telefone | `src/shared/telefone.js` (14 testes) |
 | ACL do payload de entrada | `src/infrastructure/chatclean/acl/tradutor.js` (28 testes) |
+| Analisadores de qualidade da resposta | `src/domain/qualidade/analisadores.js` (21 testes) |
+| Guarda de invariantes, ligada em producao | `src/domain/qualidade/guarda.js` (9 testes) |
+| Harness de eval com roteiros | `src/eval/` + `eval.js` (6 testes) |
 | Mensagem e motivo de descarte no domínio | `src/domain/mensageria/` |
 
 O legado **delega** para os dois módulos novos. Nenhum comportamento mudou, com uma exceção
@@ -29,6 +32,9 @@ declarada: o log de descarte agora nomeia o motivo em vez de dizer sempre "paylo
 reconhecido".
 
 ## Próximo passo
+
+**Decisao pendente do negocio:** promover `MODELO_RESPOSTA=gpt-4.1-mini` em producao. Medido:
+zero violacoes criticas contra duas do modelo atual. Ver [12-qualidade-da-ia.md](12-qualidade-da-ia.md).
 
 **Fase 2.1 — porta `CanalDeMensagem`.** É a próxima porque `ccPush` hoje mistura três destinos
 (lead, nota interna no ticket, equipe) e a captura do modo síncrono é um `if` dentro do adapter.
@@ -53,6 +59,9 @@ Ordem: teste de caracterização de `ccPush` -> porta + fake -> adapter real -> 
 | D-03 | Timeout do turno responde `timeout: true` com `respostas: []` e manda o texto pela Push API. | O fluxo precisa tratar esse caso, senão a mensagem chega duplicada. |
 | D-04 | O agrupamento de rajada vive em `Map` de módulo. | Com mais de uma instância no EasyPanel, a rajada não é agrupada entre containers. |
 | D-05 | `prints/image.png` foi versionado. | Cosmético. |
+| D-06 | `test-chat.js` e `sim-lead.js` reimplementam o turno e ja divergiram: nao tem a guarda. O comentario no topo deles afirma usar "o MESMO cerebro". | Testar no terminal nao reproduz producao. Fase 6. |
+| D-07 | O eval mede obediencia as regras, nao se a resposta e boa. | Um juiz LLM sobre os mesmos roteiros cobriria. |
+| D-08 | `MODELO_RESPOSTA` no `.env.example` sugere `gpt-4.1-mini`, mas o padrao no codigo continua `gpt-4o-mini` para nao mudar producao sem decisao. | Producao segue no modelo que inventa preco, protegida so pela guarda. |
 
 ## Como validar que nada quebrou
 
