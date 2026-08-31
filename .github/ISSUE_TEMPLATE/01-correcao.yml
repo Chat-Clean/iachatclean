@@ -1,0 +1,40 @@
+name: Correção
+description: Algo está quebrado ou se comportando de forma errada
+title: "fix: "
+labels: ["correção"]
+body:
+  - type: textarea
+    id: comportamento-atual
+    attributes:
+      label: Comportamento atual
+      description: O que acontece hoje, incluindo mensagem de erro se houver.
+    validations:
+      required: true
+  - type: textarea
+    id: comportamento-esperado
+    attributes:
+      label: Comportamento esperado
+    validations:
+      required: true
+  - type: textarea
+    id: reproducao
+    attributes:
+      label: Passos para reproduzir
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: input
+    id: ambiente
+    attributes:
+      label: Ambiente
+      placeholder: produção / staging / local
+    validations:
+      required: true
+  - type: textarea
+    id: impacto
+    attributes:
+      label: Impacto
+      description: Quem é afetado e com que gravidade.

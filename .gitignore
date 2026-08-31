@@ -4,3 +4,7 @@ node_modules/
 npm-debug.log*
 .DS_Store
 database.json
+
+# cache local do npx skills (nao versionar)
+.agents/
+skills-lock.json

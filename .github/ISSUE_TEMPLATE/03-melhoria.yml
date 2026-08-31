@@ -1,0 +1,28 @@
+name: Melhoria
+description: Refatoração, performance, dívida técnica ou ajuste de algo que já existe
+title: "chore: "
+labels: ["melhoria"]
+body:
+  - type: textarea
+    id: situacao
+    attributes:
+      label: Situação atual
+    validations:
+      required: true
+  - type: textarea
+    id: melhoria
+    attributes:
+      label: Melhoria proposta
+    validations:
+      required: true
+  - type: textarea
+    id: ganho
+    attributes:
+      label: Ganho esperado
+      description: Performance, legibilidade, custo, redução de risco — de preferência mensurável.
+    validations:
+      required: true
+  - type: textarea
+    id: risco
+    attributes:
+      label: Risco e plano de rollback
