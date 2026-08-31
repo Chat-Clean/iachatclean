@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'refatoracao/**', 'feat/**']
+  pull_request:
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      # A barreira de camada e o motivo principal do CI existir: sem ela rodando
+      # a cada push, a arquitetura volta a apodrecer em alguns meses.
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
