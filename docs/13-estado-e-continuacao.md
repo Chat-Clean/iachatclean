@@ -4,14 +4,22 @@ Documento de retomada. **Leia antes de qualquer coisa.** Atualize ao fim de cada
 
 ## Onde estamos
 
-Branch `refatoracao/arquitetura-ddd`, partindo de `feat/api-request-response`.
-**Fases 0 e 1 concluídas.** A suíte roda em menos de 1 segundo, sem rede e sem crédito da OpenAI.
+**Fases 0 e 1 concluídas e EM PRODUÇÃO.** A branch `refatoracao/arquitetura-ddd` foi mesclada
+na `develop` (PR #1) e promovida para a `main` (PR #2) em 31/08/2026. A `main` deixou de ser o
+código original.
+
+A suíte roda em cerca de 1 segundo, sem rede e sem crédito da OpenAI.
 
 ```
-npm test        44 testes, 3 arquivos, verdes
+npm test        119 testes, 9 arquivos, verdes
 npm run lint    limpo em src/ e test/
 npm run typecheck  limpo
 ```
+
+ATENÇÃO: `main` conter o código não garante que o ambiente rodou o deploy. Confirmar no
+EasyPanel se o serviço pegou o commit e se as variáveis da grade nova estão setadas lá
+(`AGENDA_INICIO`, `AGENDA_FIM=17:20`, `REUNIAO_DURACAO_MIN=40`, `AGENDA_PASSO_MIN`). Sem elas o
+código cai nos defaults e o comportamento em produção não é o que os testes cobrem.
 
 ## O que já foi entregue
 
@@ -23,14 +31,17 @@ npm run typecheck  limpo
 | Value objects de telefone | `src/shared/telefone.js` (14 testes) |
 | ACL do payload de entrada | `src/infrastructure/chatclean/acl/tradutor.js` (28 testes) |
 | Analisadores de qualidade da resposta | `src/domain/qualidade/analisadores.js` (21 testes) |
-| Guarda de invariantes, ligada em producao | `src/domain/qualidade/guarda.js` (9 testes) |
+| Guarda de invariantes, ligada em producao | `src/domain/qualidade/guarda.js` (11 testes) |
 | Harness de eval com roteiros | `src/eval/` + `eval.js` (6 testes) |
 | Funil que nao trava em campo recusado | `flow.js` (13 testes) |
 | Anti-loop que transfere em vez de emudecer | `index.js` |
 | Deteccao de incompreensao do cliente | `prompts.js` + `index.js` |
 | Mensagem e motivo de descarte no domínio | `src/domain/mensageria/` |
+| Grade de horários extraída do legado | `src/domain/agendamento/GradeDeHorarios.js` (16 + 8 testes) |
+| Falha do Google Calendar avisa a equipe | `index.js` + `GOOGLE_CALENDAR_SETUP.md` |
+| Padrão de engenharia e templates de issue/PR | `AGENTS.md`, `.github/` (PR #3) |
 
-O legado **delega** para os dois módulos novos. Nenhum comportamento mudou, com uma exceção
+O legado **delega** para os módulos novos; `calendar.js` delega a grade para o domínio. Nenhum comportamento mudou, com uma exceção
 declarada: o log de descarte agora nomeia o motivo em vez de dizer sempre "payload não
 reconhecido".
 
@@ -40,6 +51,10 @@ reconhecido".
 execucoes do roteiro de preco: 0 vazamentos contra 2 em 30 turnos do modelo atual. A guarda ja
 cobre o caso; a troca reduz a frequencia. Ver [12-qualidade-da-ia.md](12-qualidade-da-ia.md).
 
+**Pendente de merge:** o PR #4 (`develop` -> `main`) leva o `AGENTS.md` e os templates de
+issue/PR. Enquanto nao entrar na `main`, o GitHub nao aplica os templates, porque os le da branch
+padrao — e o `CLAUDE.md` da `main` referencia um `AGENTS.md` que ainda nao existe la.
+
 **Fase 2.1 — porta `CanalDeMensagem`.** É a próxima porque `ccPush` hoje mistura três destinos
 (lead, nota interna no ticket, equipe) e a captura do modo síncrono é um `if` dentro do adapter.
 Separar isso destrava o teste de integração do turno sem subir servidor.
@@ -48,7 +63,8 @@ Ordem: teste de caracterização de `ccPush` -> porta + fake -> adapter real -> 
 
 ## Contexto que não está no código
 
-- A `main` é o que roda em produção. Esta branch **nunca foi mesclada**.
+- A `main` é o que roda em produção, e **já contém as Fases 0 e 1** desde 31/08/2026.
+- O fluxo `branch -> PR -> develop -> PR -> main` passou a ser exercido de fato: PRs #1 a #4.
 - O deploy de teste está no EasyPanel, serviço `cashclean-iachatclean-fluxo`.
 - A entrada de produção hoje é um fluxo n8n que chama `POST /api/mensagem/<segredo>`.
   O `WEBHOOK_SECRET` em uso tem 48 caracteres.
@@ -63,6 +79,8 @@ Ordem: teste de caracterização de `ccPush` -> porta + fake -> adapter real -> 
 | Nada detectava "nao entendi" / "voce ja perguntou isso" | Extrai `naoEntendeu`; 1 sinal reformula, 2 seguidos transferem |
 | Se a ultima fala fosse PERGUNTA, a instrucao de handoff era descartada: equipe recebia "LEAD QUALIFICADO" e o cliente nunca ouvia que alguem ia assumir | Responde a duvida E anuncia a passagem |
 | Nada vigiava o BOT repetindo pergunta (so o cliente) | `nao-repete-pergunta` entrou na guarda e manda regerar |
+| A grade usava passo `duracao >= 60 ? duracao : 30` e oferecia horarios SOBREPOSTOS com reuniao de 40 min | Grade no dominio: 10h as 16:40, passo igual a duracao, sem fim de semana. `/diag` mostra a janela e se ha sobreposicao |
+| Falha do Google Calendar degradava em silencio: ninguem sabia que o agendamento nao aconteceu | A equipe e avisada. Documentado tambem que a tela de consentimento em "Teste" expira o refresh token a cada 7 dias |
 
 ## Dívidas conhecidas (não corrigir sem decisão do negócio)
 
