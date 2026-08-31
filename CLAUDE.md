@@ -1,3 +1,6 @@
+> **Padrão global obrigatório:** leia `../AGENTS.md` (raiz `www`) e depois `./AGENTS.md` desta pasta.
+> O conteúdo abaixo é específico deste projeto e complementa o padrão.
+
 # CLAUDE.md — SDR Virtual ChatClean
 
 Contexto permanente para qualquer agente que trabalhe neste repositório.
