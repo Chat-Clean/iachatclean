@@ -1,0 +1,21 @@
+# O Dockerfile faz "COPY . .". Sem este arquivo, um .env presente na maquina de
+# build entra na imagem.
+
+# Segredos
+.env
+.env.*
+!.env.example
+
+# Dependencias e artefatos (a imagem roda npm ci)
+node_modules/
+coverage/
+*.log
+
+# Controle de versao e ferramentas
+.git/
+.github/
+.claude/
+prints/
+docs/
+specs/
+test/

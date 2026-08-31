@@ -16,17 +16,18 @@
 // =============================================================
 
 const { google } = require('googleapis');
+const grade = require('./src/domain/agendamento/GradeDeHorarios');
 
 const TZ = 'America/Recife'; // Natal-RN, UTC-3 fixo (sem horário de verão)
 const OFFSET = '-03:00';
 // Janela de AGENDAMENTO (horários de reunião oferecidos). Configurável via env
-// AGENDA_INICIO / AGENDA_FIM no formato "HH:MM". Padrão: 09:30 às 17:00.
-function parseHHMM(s, def) {
-    const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || '').trim());
-    return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : def;
-}
-const INICIO_MIN = parseHHMM(process.env.AGENDA_INICIO, 9 * 60 + 30); // 09:30
-const FIM_MIN    = parseHHMM(process.env.AGENDA_FIM, 17 * 60);        // 17:00
+// AGENDA_INICIO / AGENDA_FIM no formato "HH:MM".
+// Padrão: primeira reunião às 10:00, última COMEÇANDO às 16:40.
+// ATENÇÃO: AGENDA_FIM é quando a reunião precisa TERMINAR, não quando ela pode
+// começar. Para que 16:40 seja oferecido com duração de 40 min, o fim é 17:20.
+const parseHHMM = grade.parseHHMM;
+const INICIO_MIN = parseHHMM(process.env.AGENDA_INICIO, 10 * 60);      // 10:00
+const FIM_MIN    = parseHHMM(process.env.AGENDA_FIM, 17 * 60 + 20);    // 17:20 (última às 16:40)
 // Horário de almoço — não oferece reuniões que caiam nessa janela.
 // Configurável via ALMOCO_INICIO/ALMOCO_FIM ("HH:MM"). Padrão: 12:30 às 13:30.
 // Para desativar, use valores iguais (ex.: ALMOCO_INICIO=ALMOCO_FIM=00:00).
@@ -38,7 +39,11 @@ const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 const REFRESH_TOKEN = process.env.GOOGLE_REFRESH_TOKEN || '';
 const TEAM_CALENDARS = (process.env.GOOGLE_TEAM_CALENDARS || '').split(',').map(s => s.trim()).filter(Boolean);
 const BOOKING_CALENDAR = process.env.GOOGLE_BOOKING_CALENDAR || TEAM_CALENDARS[0] || 'primary';
-const DURACAO_MIN = parseInt(process.env.REUNIAO_DURACAO_MIN || '30', 10);
+const DURACAO_MIN = parseInt(process.env.REUNIAO_DURACAO_MIN || '40', 10);
+// Intervalo entre os inícios das reuniões. Por padrão é a própria duração, que
+// é o único valor que nunca gera grade sobreposta. Um passo MENOR que a duração
+// é ignorado de propósito (ver GradeDeHorarios).
+const PASSO_MIN = parseInt(process.env.AGENDA_PASSO_MIN || String(DURACAO_MIN), 10);
 
 function configurado() {
     return !!(CLIENT_ID && CLIENT_SECRET && REFRESH_TOKEN && TEAM_CALENDARS.length);
@@ -72,8 +77,18 @@ function rotuloSlot(date) {
     return `${dia} ${dm} às ${hh}h${mm === '00' ? '' : mm}`;
 }
 
-// Gera os slots candidatos (dias úteis, 9h–18h, passo = duração) a partir de agora.
+// Gera os slots candidatos (dias úteis, janela AGENDA_INICIO..AGENDA_FIM) a
+// partir de agora. A grade de minutos vem do domínio, que é onde ela é testada.
 function gerarCandidatos({ dias, aPartirDe }) {
+    const minutosDoDia = grade.gerarMinutosDoDia({
+        inicioMin: INICIO_MIN,
+        fimMin: FIM_MIN,
+        duracaoMin: DURACAO_MIN,
+        passoMin: PASSO_MIN,
+        almocoIni: ALMOCO_INI,
+        almocoFim: ALMOCO_FIM
+    });
+
     const slots = [];
     let uteis = 0;
     for (let i = 0; i < dias + 5 && uteis < dias; i++) {
@@ -82,10 +97,7 @@ function gerarCandidatos({ dias, aPartirDe }) {
         if (wd === 'Sat' || wd === 'Sun') continue;
         uteis++;
         const ymd = ymdNatal(d);
-        const passo = DURACAO_MIN >= 60 ? DURACAO_MIN : 30; // passo dos horários
-        for (let mins = INICIO_MIN; mins + DURACAO_MIN <= FIM_MIN; mins += passo) {
-            // Pula horários que colidem com o almoço (sobreposição de intervalos).
-            if (mins < ALMOCO_FIM && mins + DURACAO_MIN > ALMOCO_INI) continue;
+        for (const mins of minutosDoDia) {
             const start = slotNatal(ymd, Math.floor(mins / 60), mins % 60);
             const end = new Date(start.getTime() + DURACAO_MIN * 60000);
             if (start.getTime() <= aPartirDe.getTime()) continue; // só futuro
@@ -154,6 +166,14 @@ async function cancelarReuniao({ eventId, calendarId }) {
 
 // Diagnóstico da config (sem expor valores/segredos) — usado pelo /diag.
 function diag() {
+    const minutos = grade.gerarMinutosDoDia({
+        inicioMin: INICIO_MIN,
+        fimMin: FIM_MIN,
+        duracaoMin: DURACAO_MIN,
+        passoMin: PASSO_MIN,
+        almocoIni: ALMOCO_INI,
+        almocoFim: ALMOCO_FIM
+    });
     return {
         configurado: configurado(),
         clientId: !!CLIENT_ID,
@@ -161,8 +181,28 @@ function diag() {
         refreshToken: !!REFRESH_TOKEN,
         teamCalendarsCount: TEAM_CALENDARS.length,
         bookingCalendarSet: !!process.env.GOOGLE_BOOKING_CALENDAR,
-        duracaoMin: DURACAO_MIN
+        duracaoMin: DURACAO_MIN,
+        // A grade que o bot vai oferecer, para conferir a olho sem abrir o
+        // código nem gastar chamada no Google.
+        janela: `${grade.formatarHHMM(INICIO_MIN)}-${grade.formatarHHMM(FIM_MIN)}`,
+        almoco: ALMOCO_FIM > ALMOCO_INI ? `${grade.formatarHHMM(ALMOCO_INI)}-${grade.formatarHHMM(ALMOCO_FIM)}` : null,
+        passoMin: PASSO_MIN,
+        horariosPorDia: minutos.map(grade.formatarHHMM),
+        gradeSobreposta: grade.temSobreposicao(minutos, DURACAO_MIN)
     };
 }
 
-module.exports = { configurado, horariosLivres, agendarReuniao, cancelarReuniao, rotuloSlot, diag, DURACAO_MIN, TZ };
+module.exports = {
+    configurado,
+    horariosLivres,
+    agendarReuniao,
+    cancelarReuniao,
+    rotuloSlot,
+    diag,
+    // Exportado para teste: é aqui que moram as três regras que o negócio
+    // definiu (sem fim de semana, janela do dia, almoço bloqueado). Testar a
+    // função real evita que o teste valide uma cópia da lógica.
+    gerarCandidatos,
+    DURACAO_MIN,
+    TZ
+};

@@ -1,7 +1,7 @@
 {
   "name": "iachatclean",
   "version": "1.0.0",
-  "description": "SDR Virtual ChatClean — IA externa de captação e qualificação de leads (Webhook + Push API ChatClean)",
+  "description": "SDR Virtual ChatClean — IA externa de captação e qualificação de leads (API request/response + Push API ChatClean)",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -9,7 +9,15 @@
     "chat": "node test-chat.js",
     "sim": "node sim-lead.js",
     "gauth": "node google-auth.js",
-    "cal:slots": "node cal-slots.js"
+    "cal:slots": "node cal-slots.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "lint": "eslint .",
+    "format": "prettier --write \"**/*.{js,json,md}\"",
+    "format:check": "prettier --check \"**/*.{js,json,md}\"",
+    "typecheck": "tsc -p jsconfig.json --noEmit",
+    "eval": "node eval.js"
   },
   "keywords": [
     "whatsapp",
@@ -29,9 +37,18 @@
     "form-data": "^4.0.5",
     "googleapis": "^173.0.0",
     "ioredis": "^5.11.1",
-    "openai": "^4.104.0"
+    "openai": "^4.104.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"
+    "@eslint/js": "^9.39.5",
+    "@types/node": "^26.2.0",
+    "@vitest/coverage-v8": "^3.2.7",
+    "eslint": "^9.39.5",
+    "globals": "^17.9.0",
+    "nodemon": "^3.0.2",
+    "prettier": "^3.9.6",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
   }
 }
