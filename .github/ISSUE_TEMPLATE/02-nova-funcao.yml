@@ -1,0 +1,36 @@
+name: Nova função
+description: Funcionalidade que ainda não existe
+title: "feat: "
+labels: ["nova função"]
+body:
+  - type: textarea
+    id: problema
+    attributes:
+      label: Problema / necessidade
+      description: Que dor isso resolve? Para quem?
+    validations:
+      required: true
+  - type: textarea
+    id: proposta
+    attributes:
+      label: Proposta
+    validations:
+      required: true
+  - type: textarea
+    id: criterios
+    attributes:
+      label: Critérios de aceite
+      value: |
+        - [ ]
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: ui
+    attributes:
+      label: UI e motion
+      description: Se há interface, descreva skeleton, estados de carregamento, animações de entrada/saída e progresso.
+  - type: textarea
+    id: fora-de-escopo
+    attributes:
+      label: Fora de escopo
