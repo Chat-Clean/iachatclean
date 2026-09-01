@@ -33,7 +33,7 @@ npm run gauth          # fluxo de auth do Google
 
 ## Arquitetura
 
-Refatoração para DDD em andamento na branch `refatoracao/arquitetura-ddd` (ver `docs/13-estado-e-continuacao.md`). Ao evoluir o código, siga a direção DDD/Clean da §3 do padrão global: controller valida (Zod) → service aplica regra → repository acessa dados. Regra de negócio não importa Express nem SDK externo.
+Refatoração para DDD em andamento, uma fatia por branch curta com PR para `develop` (ver `docs/13-estado-e-continuacao.md`). Fases 0 e 1 já estão na `main`. Ao evoluir o código, siga a direção DDD/Clean da §3 do padrão global: controller valida (Zod) → service aplica regra → repository acessa dados. Regra de negócio não importa Express nem SDK externo.
 
 ## Fluxo de trabalho
 
