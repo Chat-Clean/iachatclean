@@ -75,6 +75,50 @@ function aplicarCampos(leadData, extraido) {
             leadData[c] = v;
         }
     }
+    // O nome da empresa costuma entregar o ramo sozinho. Preencher aqui evita
+    // que determinarProximoCampo pergunte o obvio logo depois.
+    if (leadData.empresa && !leadData.segmento) {
+        const inferido = inferirSegmentoDaEmpresa(leadData.empresa);
+        if (inferido) leadData.segmento = inferido;
+    }
+}
+
+// Palavras que, sozinhas no NOME DA EMPRESA, ja entregam o ramo. Lista propria e
+// mais restrita que SEGMENTO_KEYWORDS: aqui o casamento e por palavra INTEIRA,
+// para "Motorola" nao virar automotivo por causa de "moto".
+const SEGMENTO_POR_NOME = {
+    energia_solar: ['solar', 'fotovoltaica', 'fotovoltaico', 'energia solar'],
+    saude:         ['clinica', 'clínica', 'consultorio', 'consultório', 'odontologia', 'odontologica', 'odontológica', 'dentista', 'laboratorio', 'laboratório', 'hospital', 'farmacia', 'farmácia', 'estetica', 'estética', 'fisioterapia', 'psicologia', 'veterinaria', 'veterinária'],
+    varejo:        ['loja', 'lojas', 'supermercado', 'mercadinho', 'boutique', 'papelaria', 'livraria', 'otica', 'ótica', 'joalheria', 'floricultura', 'magazine', 'distribuidora'],
+    automotivo:    ['concessionaria', 'concessionária', 'oficina', 'autopecas', 'autopeças', 'auto pecas', 'auto peças', 'funilaria', 'lava jato', 'motopecas', 'motopeças'],
+    alimentacao:   ['pizzaria', 'restaurante', 'lanchonete', 'padaria', 'confeitaria', 'hamburgueria', 'churrascaria', 'cafeteria', 'sorveteria', 'doceria', 'pastelaria', 'marmitaria', 'acai', 'açai', 'açaí'],
+    servicos:      ['cartorio', 'cartório', 'contabilidade', 'advocacia', 'advogados', 'corretora', 'seguros', 'imobiliaria', 'imobiliária', 'consultoria', 'despachante', 'barbearia', 'salao', 'salão', 'academia', 'grafica', 'gráfica', 'transportadora', 'construtora']
+};
+
+// Rotulo legivel gravado no campo `segmento` quando ele foi deduzido do nome.
+const SEGMENTO_ROTULOS = {
+    energia_solar: 'energia solar',
+    saude:         'saúde',
+    varejo:        'varejo',
+    automotivo:    'automotivo',
+    alimentacao:   'alimentação',
+    servicos:      'serviços'
+};
+
+// "Pizzaria 3 Irmaos" ja diz o ramo. Perguntar o segmento depois disso soa
+// desatento e irrita o cliente — era a queixa que originou esta funcao.
+// Casa por palavra INTEIRA (ou expressao exata, quando o termo tem espaco).
+function inferirSegmentoDaEmpresa(empresa) {
+    if (!empresa) return null;
+    const t = String(empresa).toLowerCase();
+    const palavras = t.split(/[^0-9a-zà-ÿ]+/).filter(Boolean);
+    for (const [key, termos] of Object.entries(SEGMENTO_POR_NOME)) {
+        for (const termo of termos) {
+            const casou = termo.includes(' ') ? t.includes(termo) : palavras.includes(termo);
+            if (casou) return SEGMENTO_ROTULOS[key];
+        }
+    }
+    return null;
 }
 
 // Detecta a chave de segmento (para o gancho de case) por palavras-chave.
@@ -121,5 +165,6 @@ module.exports = {
     camposDesistidos,
     aplicarCampos,
     detectarSegmento,
+    inferirSegmentoDaEmpresa,
     escolhaDeSlot
 };
