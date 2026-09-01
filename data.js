@@ -24,7 +24,7 @@ const EMPRESA_INFO = {
 //  O QUE A PLATAFORMA FAZ (base de conhecimento do bot)
 // -------------------------------------------------------------
 const RECURSOS = {
-    canais: 'WhatsApp (API oficial/WABA e não oficial via WhatsApp WEB, sempre dentro das regras da Meta), Instagram (Direct, comentários e chatbot), Facebook, Telegram, Webchat (chat no site) e integrações via Webhook e n8n.',
+    canais: 'WhatsApp pela API Oficial da Meta (WhatsApp Business API / WABA), sempre dentro das regras da Meta, Instagram (Direct, comentários e chatbot), Facebook, Telegram, Webchat (chat no site) e integrações via Webhook e n8n.',
     crm: 'CRM completo: cadastro de contatos e empresas com campos personalizados, histórico centralizado de todas as conversas, organização por etiquetas/status/origem/segmento, pipelines de vendas em kanban com etapas personalizáveis, registro de oportunidades com valor e responsável, tarefas, lembretes, follow-ups e relatórios de conversão.',
     whatsapp: 'Multiatendimento (vários atendentes no mesmo número), chatbot de triagem e fluxos, disparo em massa (campanhas, avisos, lembretes) dentro das regras da Meta, agendamento de mensagens e histórico detalhado por cliente.',
     instagram: 'Atendimento no Direct com IA, resposta automática a comentários em posts com abertura de Direct e chatbot completo — praticamente tudo que existe no WhatsApp existe no Instagram.',
