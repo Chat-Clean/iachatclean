@@ -16,8 +16,9 @@ O transporte é a plataforma **ChatClean**. Desde a migração para request/resp
 lead volta no **corpo da própria requisição**; a Push API (`CC_PUSH_URL`) segue sendo o canal de
 nota interna no ticket, resumo para a equipe e follow-up de reativação.
 
-**Estado atual:** refatoração estrutural em andamento na branch `refatoracao/arquitetura-ddd`.
-A `main` segue no código original. Ver [docs/13-estado-e-continuacao.md](docs/13-estado-e-continuacao.md).
+**Estado atual:** Fases 0 e 1 da refatoração estrutural concluídas e **em produção** na `main`.
+As fases seguintes continuam pela mesma rota. Ver
+[docs/13-estado-e-continuacao.md](docs/13-estado-e-continuacao.md).
 
 ## Regra número 1
 
@@ -55,7 +56,10 @@ coisa.
   emoji como marcador visual e não serão reescritos só por isso.
 - **Commits concisos.** Assunto no padrão convencional e, no máximo, uma linha de corpo. O
   detalhamento vive na spec, não no histórico do git.
-- **Branch dedicada.** O trabalho de refatoração fica em `refatoracao/arquitetura-ddd`.
+- **Branch curta por fatia.** Cada fatia vive em uma branch própria (`refactor/<slug>`,
+  `fix/<slug>`, `docs/<slug>`) com PR para `develop`. Não existe mais uma branch longa de
+  refatoração: a `refatoracao/arquitetura-ddd` cumpriu esse papel até as Fases 0 e 1 e foi
+  encerrada.
 - **Linguagem ubíqua em português** para domínio (`Atendimento`, `Qualificacao`, `Agendamento`,
   `Transbordo`, `Oportunidade`, `Expediente`). Termos técnicos em inglês (`Repository`, `Port`,
   `Adapter`, `UseCase`).
