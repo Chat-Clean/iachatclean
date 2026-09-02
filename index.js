@@ -301,6 +301,10 @@ function contextoDeQualidade(leadData) {
     const ultima = respostasAnteriores[respostasAnteriores.length - 1];
     return {
         primeiroNome,
+        // Citar hora so e legitimo depois de o SISTEMA oferecer a grade numerada.
+        sistemaOfereceuHorarios: Boolean(
+            leadData.aguardandoEscolhaSlot && (leadData.slotsOferecidos || []).length
+        ),
         usouNomeNaAnterior: Boolean(
             ultima && primeiroNome.length > 1 && String(ultima.content).toLowerCase().includes(primeiroNome.toLowerCase())
         ),
