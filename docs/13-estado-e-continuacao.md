@@ -94,6 +94,7 @@ Ordem: teste de caracterização de `ccPush` -> porta + fake -> adapter real -> 
 | D-06 | `test-chat.js` e `sim-lead.js` reimplementam o turno e ja divergiram: nao tem a guarda. O comentario no topo deles afirma usar "o MESMO cerebro". | Testar no terminal nao reproduz producao. Fase 6. |
 | D-07 | O eval mede obediencia as regras, nao se a resposta e boa. | Um juiz LLM sobre os mesmos roteiros cobriria. |
 | D-09 | Com `temperature: 0.7` o placar varia entre execucoes. So a medicao de vazamento de preco foi repetida (5x). | Numero de execucao unica e anedota, nao estatistica. |
+| D-10 | O log `📩 <numero> [tipo]: "<texto>"` continua imprimindo telefone e conteúdo da mensagem no stdout. É log do legado, útil para operação, mas é PII sob LGPD. | O payload bruto já foi fechado (`LOG_PAYLOAD_RAW=false`); esta linha ficou. Decidir se mascara o número (`5584****0845`) ou se some com o texto. |
 | D-08 | `MODELO_RESPOSTA` no `.env.example` sugere `gpt-4.1-mini`, mas o padrao no codigo continua `gpt-4o-mini` para nao mudar producao sem decisao. | Producao segue no modelo que inventa preco, protegida so pela guarda. |
 
 ## Como validar que nada quebrou
