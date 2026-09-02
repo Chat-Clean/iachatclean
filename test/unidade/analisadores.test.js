@@ -21,8 +21,13 @@ describe('estilo', () => {
     it('conta emoji por code point, nao por par substituto', () => {
         expect(a.contarEmojis('oi 😊')).toBe(1);
         expect(a.contarEmojis('oi 😊 tudo bem 🙂')).toBe(2);
-        expect(ok(a.noMaximoUmEmoji, 'oi 😊')).toBe(true);
-        expect(ok(a.noMaximoUmEmoji, 'oi 😊🙂')).toBe(false);
+    });
+
+    // O negocio pediu ZERO emoji: um ja e violacao.
+    it('nao tolera nenhum emoji', () => {
+        expect(ok(a.semEmoji, 'oi, tudo bem?')).toBe(true);
+        expect(ok(a.semEmoji, 'oi 😊')).toBe(false);
+        expect(ok(a.semEmoji, 'oi 😊🙂')).toBe(false);
     });
 
     it('pega markdown que o WhatsApp nao renderiza', () => {
@@ -127,7 +132,7 @@ describe('semelhantes', () => {
 
 describe('analisar (execucao completa)', () => {
     it('aprova uma resposta ideal', () => {
-        const r = a.analisar('Show! Em qual segmento sua empresa atua? 😊');
+        const r = a.analisar('Show! Me conta o que mais te incomoda hoje?');
         expect(r.ok).toBe(true);
         expect(r.violacoes).toHaveLength(0);
     });
@@ -139,7 +144,7 @@ describe('analisar (execucao completa)', () => {
         expect(ids).toContain('nao-revela-preco');
         expect(ids).toContain('sem-dispensa');
         expect(ids).toContain('max-2-linhas');
-        expect(ids).toContain('max-1-emoji');
+        expect(ids).toContain('sem-emoji');
         expect(r.violacoes.some((v) => v.gravidade === 'critica')).toBe(true);
     });
 
