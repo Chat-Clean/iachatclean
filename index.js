@@ -54,6 +54,10 @@ const LOOP_JANELA_MS  = parseInt(process.env.LOOP_JANELA_MIN || '3', 10) * 60 * 
 // No WhatsApp o cliente costuma mandar várias mensagens seguidas; juntamos tudo
 // num único turno em vez de responder só a primeira e ignorar o resto.
 const AGRUPAR_MS     = parseInt(process.env.AGRUPAR_MENSAGENS_MS || '2000', 10);
+// Log do payload BRUTO. Desligado por padrao: o corpo traz nome, telefone, URL
+// da foto e o wamid (que carrega o numero embutido) — PII sob LGPD no stdout.
+// Ligue so para depurar um formato novo, e desligue depois.
+const LOG_PAYLOAD_RAW = (process.env.LOG_PAYLOAD_RAW || 'false') === 'true';
 // Modelos da OpenAI por tarefa. Estavam fixos no meio do codigo, em quatro
 // lugares diferentes; agora sao uma decisao de configuracao.
 const MODELO_RESPOSTA  = process.env.MODELO_RESPOSTA  || 'gpt-4o-mini';
@@ -1010,6 +1014,7 @@ const acl = require('./src/infrastructure/chatclean/acl/tradutor');
 const guarda = require('./src/domain/qualidade/guarda');
 const { extrairPergunta } = require('./src/domain/qualidade/analisadores');
 const { MOTIVOS } = require('./src/domain/mensageria/MotivoDeDescarte');
+const { resumoSeguro } = require('./src/shared/resumoDePayload');
 
 const normalizarCorpo = acl.normalizarCorpo;
 
@@ -1133,8 +1138,12 @@ async function handleApiMensagem(req, res) {
     }
     try {
         const corpo = normalizarCorpo(req.body);
-        console.log('🔍 PAYLOAD RAW [' + (req.headers['content-type'] || 'sem content-type') + ']:',
-                    JSON.stringify(req.body, null, 2).slice(0, 4000));
+        if (LOG_PAYLOAD_RAW) {
+            console.warn('🔍 PAYLOAD RAW (LOG_PAYLOAD_RAW=true — contém PII, desligue em produção):',
+                        JSON.stringify(req.body, null, 2).slice(0, 4000));
+        } else {
+            console.log('🔍 PAYLOAD:', JSON.stringify(resumoSeguro(req.body, req.headers['content-type'])));
+        }
 
         const parsed = parsePayload(corpo);
         if (!parsed) return respIgnorado(res, 'payload não reconhecido ou mensagem descartada');
