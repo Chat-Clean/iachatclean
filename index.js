@@ -113,8 +113,13 @@ async function ccPush(number, payloadExtra = {}) {
     // resumo para a equipe (outro número) e follow-up de reativação (fora de
     // qualquer requisição) — continua saindo normalmente pela Push API.
     const cap = capturaCtx.getStore();
-    if (!RESPOSTA_VIA_PUSH && cap && !cap.expirado && payloadExtra.body
-        && !payloadExtra.onlyNote && normalizarPhone(number) === cap.chatId) {
+    // Resposta AO LEAD dentro de um turno — o que distingue de nota interna,
+    // resumo para a equipe (outro numero) e follow-up fora de requisicao.
+    const respostaAoLead = Boolean(
+        cap && payloadExtra.body && !payloadExtra.onlyNote
+        && normalizarPhone(number) === cap.chatId
+    );
+    if (!RESPOSTA_VIA_PUSH && respostaAoLead && !cap.expirado) {
         cap.mensagens.push(String(payloadExtra.body));
         return true;
     }
@@ -125,6 +130,10 @@ async function ccPush(number, payloadExtra = {}) {
             externalKey: crypto.randomUUID(),
             ...payloadExtra
         }, { headers: { 'Content-Type': 'application/json' }, timeout: 30000 });
+        // Sem esta contagem o turno em modo push se declarava silencioso: a
+        // captura fica vazia de proposito e o log dizia "nao gerou resposta"
+        // logo depois de responder.
+        if (respostaAoLead) cap.enviadasPorPush = (cap.enviadasPorPush || 0) + 1;
         return true;
     } catch (e) {
         console.error('❌ Erro no Push ChatClean:', e.response?.data || e.message);
@@ -933,7 +942,7 @@ function montarUnidade(chatId, b) {
 
 // Roda um turno com a captura ativa e devolve o corpo da resposta HTTP.
 async function executarTurno(unidade) {
-    const captura = { chatId: unidade.chatId, mensagens: [], expirado: false };
+    const captura = { chatId: unidade.chatId, mensagens: [], expirado: false, enviadasPorPush: 0 };
     let estourou = false;
     let timer = null;
     const guarda = new Promise(resolve => {
@@ -948,7 +957,10 @@ async function executarTurno(unidade) {
     if (estourou) {
         console.warn('⏱️ Turno de ' + unidade.chatId + ' passou de ' + SYNC_TIMEOUT_MS + 'ms — respondendo com o que já há.');
     }
-    if (!captura.mensagens.length) {
+    if (!captura.mensagens.length && captura.enviadasPorPush) {
+        console.log('✅ Turno de ' + unidade.chatId + ' respondeu ' + captura.enviadasPorPush +
+                    ' mensagem(ns) pela Push API (RESPOSTA_VIA_PUSH=true).');
+    } else if (!captura.mensagens.length) {
         console.log('ℹ️ Turno de ' + unidade.chatId + ' não gerou resposta ao lead (encaminhamento, loop detectado ou turno silencioso).');
     } else {
         // Turno bem-sucedido nao logava NADA, entao "a IA nao responde" era
