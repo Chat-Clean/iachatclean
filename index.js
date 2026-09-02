@@ -943,6 +943,13 @@ async function executarTurno(unidade) {
     }
     if (!captura.mensagens.length) {
         console.log('ℹ️ Turno de ' + unidade.chatId + ' não gerou resposta ao lead (encaminhamento, loop detectado ou turno silencioso).');
+    } else {
+        // Turno bem-sucedido nao logava NADA, entao "a IA nao responde" era
+        // indistinguivel de "a resposta nao chegou ao lead". Conta e tamanho
+        // bastam para separar os dois casos; o texto fica fora do log.
+        const chars = captura.mensagens.join('').length;
+        console.log('✅ Turno de ' + unidade.chatId + ' respondeu ' + captura.mensagens.length +
+                    ' mensagem(ns), ' + chars + ' chars.');
     }
     return {
         status: 'ok',
