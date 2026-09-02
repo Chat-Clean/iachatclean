@@ -153,6 +153,19 @@ function naoAfirmaAgendamento(resposta) {
     return RESULTADO('nao-afirma-agendamento', 'critica', !achada, achada || null);
 }
 
+// Quem oferece horario e o SISTEMA, com a grade numerada vinda do Google
+// Calendar. Quando o Calendar falha ou nao devolve slot, o fluxo entrega a
+// conversa ao modelo — e ele inventava ("Temos 10h, 14h e 16h"), inclusive
+// horario ja passado. Citar hora so vale quando a grade foi oferecida.
+// (?<!\d) evita casar o "4h" de "24h" (ex.: "suporte 24h").
+const RE_HORARIO = /(?<!\d)(?:[01]?\d|2[0-3])\s*(?:h(?:oras?)?\b|:[0-5]\d\b)/i;
+
+function naoInventaHorario(resposta, contexto = {}) {
+    if (contexto.sistemaOfereceuHorarios) return RESULTADO('nao-inventa-horario', 'critica', true);
+    const m = String(resposta).match(RE_HORARIO);
+    return RESULTADO('nao-inventa-horario', 'critica', !m, m ? m[0] : null);
+}
+
 // O prompt proíbe dizer que não lê links; deve responder a dúvida e ignorar o link.
 const NEGATIVAS_DE_LINK = ['não consigo acessar', 'nao consigo acessar', 'não leio links', 'não abro links', 'não consigo abrir o link'];
 
@@ -237,6 +250,7 @@ const ANALISADORES = [
     naoRevelaSerIA,
     naoRevelaPreco,
     naoAfirmaAgendamento,
+    naoInventaHorario,
     naoNegaLerLinks,
     naoNegaVerImagens,
     naoRepeteNomeSeguidamente,
@@ -272,6 +286,7 @@ module.exports = {
     naoRevelaSerIA,
     naoRevelaPreco,
     naoAfirmaAgendamento,
+    naoInventaHorario,
     naoNegaLerLinks,
     naoNegaVerImagens,
     naoRepeteNomeSeguidamente,

@@ -21,7 +21,7 @@ const { analisar } = require('./analisadores');
 
 // Só o que causa dano real de negócio entra aqui. Estilo (emoji, linhas) não
 // justifica uma segunda chamada ao modelo.
-const CRITICAS = new Set(['nao-revela-preco', 'nao-revela-ser-ia', 'nao-afirma-agendamento']);
+const CRITICAS = new Set(['nao-revela-preco', 'nao-revela-ser-ia', 'nao-afirma-agendamento', 'nao-inventa-horario']);
 const ALTAS_CORRIGIVEIS = new Set(['nao-nega-ler-links', 'nao-nega-ver-imagens', 'sem-dispensa', 'nao-repete-pergunta']);
 
 const INSTRUCOES = {
@@ -34,6 +34,9 @@ const INSTRUCOES = {
     'nao-afirma-agendamento':
         'Você afirmou que a reunião está marcada. Quem confirma é o sistema, depois que o cliente escolhe um horário pelo número. ' +
         'Reescreva pedindo que ele escolha pelo número.',
+    'nao-inventa-horario':
+        'Você citou um horário. NUNCA invente horário de reunião: a grade vem do Google Calendar e quem a oferece é o sistema, numerada. ' +
+        'Reescreva dizendo que vai confirmar a agenda do time e já retorna com os horários.',
     'nao-nega-ler-links':
         'Você disse que não consegue acessar o link. Nunca diga isso: ignore o link e responda apenas à dúvida do cliente.',
     'nao-nega-ver-imagens':
@@ -54,7 +57,9 @@ const RESPOSTAS_SEGURAS = {
         'Nossa plataforma utiliza inteligência artificial para apoiar o time no atendimento. ' +
         'Me conta: o que você quer melhorar hoje no seu atendimento?',
     'nao-afirma-agendamento':
-        'Para eu seguir certinho, me diz o número do horário que ficou melhor pra você?'
+        'Para eu seguir certinho, me diz o número do horário que ficou melhor pra você?',
+    'nao-inventa-horario':
+        'Deixa eu confirmar a agenda do time e já te passo os horários certinhos. Pode ser?'
 };
 
 /**
