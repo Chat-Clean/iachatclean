@@ -43,9 +43,9 @@ function noMaximoDuasLinhas(resposta) {
     return RESULTADO('max-2-linhas', 'media', linhas.length <= 2, linhas.length > 2 ? `${linhas.length} linhas` : null);
 }
 
-function noMaximoUmEmoji(resposta) {
+function semEmoji(resposta) {
     const n = contarEmojis(resposta);
-    return RESULTADO('max-1-emoji', 'media', n <= 1, n > 1 ? `${n} emojis` : null);
+    return RESULTADO('sem-emoji', 'media', n === 0, n > 0 ? `${n} emoji(s)` : null);
 }
 
 // O prompt proíbe markdown porque o WhatsApp não renderiza igual e sobra ruído
@@ -242,7 +242,7 @@ function semelhantes(a, b) {
 
 const ANALISADORES = [
     noMaximoDuasLinhas,
-    noMaximoUmEmoji,
+    semEmoji,
     semMarkdown,
     semFraseDeDispensa,
     naoSeDespede,
@@ -278,7 +278,7 @@ module.exports = {
     extrairPergunta,
     semelhantes,
     noMaximoDuasLinhas,
-    noMaximoUmEmoji,
+    semEmoji,
     semMarkdown,
     semFraseDeDispensa,
     naoSeDespede,

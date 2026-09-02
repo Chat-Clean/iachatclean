@@ -6,13 +6,7 @@ const flow = require('../../flow.js');
 
 const leadCompletoMenos = (faltando) => {
     const lead = {
-        objetivo: 'atendimento',
         nome: 'Joao',
-        empresa: 'Padaria Pao Quente',
-        segmento: 'alimentacao',
-        cidadeEstado: 'Natal-RN',
-        canais: 'WhatsApp',
-        volume: '200/mes',
         dor: 'demora pra responder',
         urgencia: 'agora',
         decisor: 'sozinho'
@@ -22,9 +16,26 @@ const leadCompletoMenos = (faltando) => {
 };
 
 describe('ordem do funil', () => {
-    it('pede objetivo primeiro, nome depois', () => {
-        expect(flow.determinarProximoCampo({}).campo).toBe('objetivo');
-        expect(flow.determinarProximoCampo({ objetivo: 'vendas' }).campo).toBe('nome');
+    // Triagem encurtada: nome, dor, urgencia, decisor. Nada mais e perguntado.
+    it('pede nome primeiro, dor depois', () => {
+        expect(flow.determinarProximoCampo({}).campo).toBe('nome');
+        expect(flow.determinarProximoCampo({ nome: 'Joao' }).campo).toBe('dor');
+    });
+
+    it('nao pergunta empresa, segmento, cidade, canais nem volume', () => {
+        const perguntados = flow.CAMPOS;
+        for (const campo of ['empresa', 'segmento', 'cidadeEstado', 'canais', 'volume', 'objetivo']) {
+            expect(perguntados).not.toContain(campo);
+        }
+    });
+
+    it('mas ainda CAPTURA esses campos quando o cliente fala por conta propria', () => {
+        const lead = {};
+        flow.aplicarCampos(lead, { nome: 'Joao', empresa: 'Padaria Pao Quente', cidadeEstado: 'Natal-RN' });
+        expect(lead.empresa).toBe('Padaria Pao Quente');
+        expect(lead.cidadeEstado).toBe('Natal-RN');
+        // Capturar empresa NAO gera pergunta nova: o proximo campo segue sendo a dor.
+        expect(flow.determinarProximoCampo(lead).campo).toBe('dor');
     });
 
     it('marca a qualificacao completa quando tudo foi coletado', () => {
@@ -39,46 +50,46 @@ describe('campo recusado nao trava o funil', () => {
     // campo null para sempre. qualificacaoCompleta nunca virava true e o
     // encaminhamento ao especialista NUNCA disparava.
     it('insiste no campo ate o limite e depois segue em frente', () => {
-        const lead = { objetivo: 'atendimento', nome: 'Joao' };
+        const lead = { nome: 'Joao' };
 
-        expect(flow.determinarProximoCampo(lead).campo).toBe('empresa');
-        flow.registrarTentativa(lead, 'empresa');
+        expect(flow.determinarProximoCampo(lead).campo).toBe('dor');
+        flow.registrarTentativa(lead, 'dor');
 
-        expect(flow.determinarProximoCampo(lead).campo).toBe('empresa');
-        flow.registrarTentativa(lead, 'empresa');
+        expect(flow.determinarProximoCampo(lead).campo).toBe('dor');
+        flow.registrarTentativa(lead, 'dor');
 
         // Insistiu duas vezes: desiste e vai para o proximo.
-        expect(flow.determinarProximoCampo(lead).campo).toBe('segmento');
+        expect(flow.determinarProximoCampo(lead).campo).toBe('urgencia');
     });
 
     it('completa a qualificacao mesmo com um campo recusado', () => {
-        const lead = leadCompletoMenos('empresa');
-        flow.registrarTentativa(lead, 'empresa');
-        flow.registrarTentativa(lead, 'empresa');
+        const lead = leadCompletoMenos('dor');
+        flow.registrarTentativa(lead, 'dor');
+        flow.registrarTentativa(lead, 'dor');
 
         expect(flow.determinarProximoCampo(lead)).toBe(null);
         expect(lead.qualificacaoCompleta).toBe(true);
     });
 
     it('lista os campos que ficaram sem resposta, para o resumo da equipe', () => {
-        const lead = leadCompletoMenos('empresa');
-        flow.registrarTentativa(lead, 'empresa');
-        flow.registrarTentativa(lead, 'empresa');
-        expect(flow.camposDesistidos(lead)).toEqual(['empresa']);
+        const lead = leadCompletoMenos('dor');
+        flow.registrarTentativa(lead, 'dor');
+        flow.registrarTentativa(lead, 'dor');
+        expect(flow.camposDesistidos(lead)).toEqual(['dor']);
     });
 
     it('nao lista como desistido o campo que o lead acabou informando', () => {
-        const lead = { empresa: 'Padaria' };
-        flow.registrarTentativa(lead, 'empresa');
-        flow.registrarTentativa(lead, 'empresa');
+        const lead = { dor: 'demora pra responder' };
+        flow.registrarTentativa(lead, 'dor');
+        flow.registrarTentativa(lead, 'dor');
         expect(flow.camposDesistidos(lead)).toEqual([]);
     });
 
     it('respeita um limite customizado', () => {
-        const lead = { objetivo: 'x', nome: 'y' };
-        flow.registrarTentativa(lead, 'empresa');
-        expect(flow.determinarProximoCampo(lead, { maxTentativas: 1 }).campo).toBe('segmento');
-        expect(flow.determinarProximoCampo(lead, { maxTentativas: 5 }).campo).toBe('empresa');
+        const lead = { nome: 'y' };
+        flow.registrarTentativa(lead, 'dor');
+        expect(flow.determinarProximoCampo(lead, { maxTentativas: 1 }).campo).toBe('urgencia');
+        expect(flow.determinarProximoCampo(lead, { maxTentativas: 5 }).campo).toBe('dor');
     });
 });
 

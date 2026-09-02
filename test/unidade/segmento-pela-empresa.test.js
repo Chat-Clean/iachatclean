@@ -30,18 +30,20 @@ describe('segmento deduzido do nome da empresa', () => {
         expect(inferirSegmentoDaEmpresa(null)).toBe(null);
     });
 
-    it('o funil NAO pergunta o segmento depois de "Pizzaria 3 Irmaos"', () => {
-        const lead = { objetivo: 'vender mais', nome: 'Joao' };
+    // O segmento deixou de ser PERGUNTADO na triagem curta, mas continua sendo
+    // deduzido: alimenta o gancho de case e o resumo que a equipe recebe.
+    it('deduz o segmento sem gerar pergunta nova no funil', () => {
+        const lead = { nome: 'Joao' };
         aplicarCampos(lead, { empresa: 'Pizzaria 3 Irmãos' });
         expect(lead.segmento).toBe('alimentação');
-        expect(determinarProximoCampo(lead).campo).toBe('cidadeEstado');
+        expect(determinarProximoCampo(lead).campo).toBe('dor');
     });
 
-    it('o funil AINDA pergunta o segmento quando o nome nao entrega', () => {
-        const lead = { objetivo: 'vender mais', nome: 'Joao' };
+    it('nome sem pista nao deduz, e o funil segue igual', () => {
+        const lead = { nome: 'Joao' };
         aplicarCampos(lead, { empresa: 'Silva & Filhos' });
         expect(lead.segmento).toBeUndefined();
-        expect(determinarProximoCampo(lead).campo).toBe('segmento');
+        expect(determinarProximoCampo(lead).campo).toBe('dor');
     });
 
     it('nao sobrescreve o segmento que o cliente informou', () => {

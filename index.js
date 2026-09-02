@@ -142,8 +142,11 @@ async function ccPush(number, payloadExtra = {}) {
 }
 
 async function enviarMensagem(chatId, texto) {
-    if (!texto || !String(texto).trim()) return false;
-    return ccPush(chatId, { body: texto });
+    // Emoji sai aqui, no unico ponto por onde passa toda mensagem ao lead. A
+    // regra no prompt e a guarda sao probabilisticas; esta nao e.
+    const limpo = removerEmojis(texto);
+    if (!limpo || !String(limpo).trim()) return false;
+    return ccPush(chatId, { body: limpo });
 }
 
 // Quebra a resposta em mensagens curtas (registro de WhatsApp), a menos que
@@ -610,7 +613,7 @@ async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, 
         if (String(texto).toLowerCase() === '/reset') {
             await store.deleteLead(chatId);
             leadData = null;
-            await enviarMensagem(chatId, '🔄 Conversa resetada! Vamos começar de novo 😊');
+            await enviarMensagem(chatId, 'Conversa resetada! Vamos começar de novo.');
             return;
         }
 
@@ -754,11 +757,11 @@ async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, 
                     console.log(`📝 Transcrição: "${texto}"`);
                 } catch (e) {
                     console.error('❌ Erro ao transcrever áudio:', e.message);
-                    await enviarMensagem(chatId, 'Recebi seu áudio! Por aqui prefiro que a gente converse por texto pra eu anotar tudo certinho. Pode me escrever? 😊');
+                    await enviarMensagem(chatId, 'Recebi seu áudio! Por aqui prefiro que a gente converse por texto pra eu anotar tudo certinho. Pode me escrever?');
                     return;
                 }
             } else {
-                await enviarMensagem(chatId, 'Recebi seu áudio, mas não consegui abrir por aqui. Pode me escrever, por favor? 😊');
+                await enviarMensagem(chatId, 'Recebi seu áudio, mas não consegui abrir por aqui. Pode me escrever, por favor?');
                 return;
             }
         }
@@ -812,7 +815,7 @@ async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, 
             // Cliente ATUAL pedindo suporte → encaminha para Suporte/CS (não é lead novo)
             if (extraido.tipoContato === 'cliente' && !leadData.finalizado) {
                 if (!usuarioNoHistorico) leadData.conversationHistory.push({ role: 'user', content: texto });
-                await enviarMensagem(chatId, 'Entendi! Vou te encaminhar pro nosso time de Suporte, que já cuida disso com você 😊');
+                await enviarMensagem(chatId, 'Entendi! Vou te encaminhar pro nosso time de Suporte, que já cuida disso com você.');
                 await notificarEquipe(leadData, chatId, { departamento: DEPARTAMENTOS.suporte, tagExtra: 'CLIENTE ATUAL' });
                 leadData.finalizado = true;
                 return;
@@ -858,7 +861,7 @@ async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, 
             // fallback caloroso e encerra o turno (o que já foi extraído fica salvo;
             // a próxima mensagem retoma a qualificação de onde parou).
             console.error(`❌ Erro ao gerar resposta IA para ${chatId}:`, e.message);
-            await enviarMensagem(chatId, 'Opa, tive uma instabilidade rapidinha por aqui 😅 Pode me mandar de novo o que você disse?');
+            await enviarMensagem(chatId, 'Opa, tive uma instabilidade rapidinha por aqui. Pode me mandar de novo o que você disse?');
             if (!usuarioNoHistorico) leadData.conversationHistory.push({ role: 'user', content: texto });
             return;
         }
@@ -1046,6 +1049,7 @@ const { extrairPergunta } = require('./src/domain/qualidade/analisadores');
 const { MOTIVOS } = require('./src/domain/mensageria/MotivoDeDescarte');
 const { resumoSeguro } = require('./src/shared/resumoDePayload');
 const { criarRegistroDeTurnos } = require('./src/shared/registroDeTurnos');
+const { removerEmojis } = require('./src/shared/semEmoji');
 
 const normalizarCorpo = acl.normalizarCorpo;
 
@@ -1194,7 +1198,7 @@ async function handleApiMensagem(req, res) {
 
         // Mídia não suportada (sticker, localização...) → fallback humanizado
         if (!TIPOS_SUPORTADOS.includes(parsed.tipo)) {
-            const aviso = 'Pode me mandar por texto o que você precisa? Assim consigo te ajudar melhor 🙂';
+            const aviso = 'Pode me mandar por texto o que você precisa? Assim consigo te ajudar melhor.';
             return res.status(200).json({
                 status: 'ok', chatId: parsed.chatId, timeout: false,
                 respostas: [aviso], resposta: aviso,
