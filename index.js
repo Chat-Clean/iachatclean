@@ -1015,6 +1015,7 @@ const guarda = require('./src/domain/qualidade/guarda');
 const { extrairPergunta } = require('./src/domain/qualidade/analisadores');
 const { MOTIVOS } = require('./src/domain/mensageria/MotivoDeDescarte');
 const { resumoSeguro } = require('./src/shared/resumoDePayload');
+const { criarRegistroDeTurnos } = require('./src/shared/registroDeTurnos');
 
 const normalizarCorpo = acl.normalizarCorpo;
 
@@ -1037,7 +1038,7 @@ function parsePayload(body) {
     }
 }
 
-const mensagensProcessadas = new Set(); // dedup de webhooks
+const registroDeTurnos = criarRegistroDeTurnos(); // reenvio devolve a MESMA resposta
 const TIPOS_SUPORTADOS = ['text', 'image', 'document', 'audio', 'ptt', 'video'];
 
 // Valida o token do webhook contra WEBHOOK_SECRET. Aceita no header
@@ -1161,18 +1162,6 @@ async function handleApiMensagem(req, res) {
             return respIgnorado(res, 'rate-limit', parsed.chatId);
         }
 
-        // Dedup: o fluxo pode reenviar a mesma mensagem em caso de retry.
-        if (parsed.msgId) {
-            if (mensagensProcessadas.has(parsed.msgId)) {
-                console.log(`↩️ Mensagem duplicada (${parsed.msgId}) ignorada`);
-                return respIgnorado(res, 'mensagem duplicada', parsed.chatId);
-            }
-            mensagensProcessadas.add(parsed.msgId);
-            if (mensagensProcessadas.size > 500) {
-                [...mensagensProcessadas].slice(0, 200).forEach(id => mensagensProcessadas.delete(id));
-            }
-        }
-
         // Mídia não suportada (sticker, localização...) → fallback humanizado
         if (!TIPOS_SUPORTADOS.includes(parsed.tipo)) {
             const aviso = 'Pode me mandar por texto o que você precisa? Assim consigo te ajudar melhor 🙂';
@@ -1183,7 +1172,16 @@ async function handleApiMensagem(req, res) {
         }
 
         // Agrupa a rajada e espera o turno; a resposta sai na última requisição.
-        return res.status(200).json(await agruparEProcessar(parsed));
+        // Reenvio do MESMO msgId (o chamador desistiu por timeout) nao entra na
+        // rajada de novo: espera o turno original e recebe a mesma resposta.
+        const { promessa, reenvio } = registroDeTurnos.obterOuCriar(
+            parsed.msgId,
+            () => agruparEProcessar(parsed)
+        );
+        if (reenvio) {
+            console.log(`↩️ Reenvio de ${parsed.msgId} — aguardando a resposta do turno original.`);
+        }
+        return res.status(200).json(await promessa);
     } catch (e) {
         console.error('❌ Erro no handler:', e);
         return res.status(500).json({

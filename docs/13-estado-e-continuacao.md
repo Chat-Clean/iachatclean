@@ -78,6 +78,7 @@ Ordem: teste de caracterização de `ccPush` -> porta + fake -> adapter real -> 
 | Cliente repetindo a mesma mensagem 3x fazia o bot emudecer de vez | Transfere para humano com mensagem ao lead |
 | Nada detectava "nao entendi" / "voce ja perguntou isso" | Extrai `naoEntendeu`; 1 sinal reformula, 2 seguidos transferem |
 | Se a ultima fala fosse PERGUNTA, a instrucao de handoff era descartada: equipe recebia "LEAD QUALIFICADO" e o cliente nunca ouvia que alguem ia assumir | Responde a duvida E anuncia a passagem |
+| O n8n desistia do turno por timeout e reenviava a mensagem; o dedupe respondia "duplicada" com `respostas: []` e o LEAD FICAVA SEM RESPOSTA. Diagnosticado no log de producao: so as mensagens que passam pelo modelo duplicavam, `/reset` nao | Reenvio do mesmo `msgId` espera o turno original e recebe a mesma resposta (`src/shared/registroDeTurnos.js`) |
 | Nada vigiava o BOT repetindo pergunta (so o cliente) | `nao-repete-pergunta` entrou na guarda e manda regerar |
 | A grade usava passo `duracao >= 60 ? duracao : 30` e oferecia horarios SOBREPOSTOS com reuniao de 40 min | Grade no dominio: 10h as 16:40, passo igual a duracao, sem fim de semana. `/diag` mostra a janela e se ha sobreposicao |
 | Falha do Google Calendar degradava em silencio: ninguem sabia que o agendamento nao aconteceu | A equipe e avisada. Documentado tambem que a tela de consentimento em "Teste" expira o refresh token a cada 7 dias |
