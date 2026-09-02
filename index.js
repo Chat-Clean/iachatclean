@@ -58,6 +58,13 @@ const AGRUPAR_MS     = parseInt(process.env.AGRUPAR_MENSAGENS_MS || '2000', 10);
 // da foto e o wamid (que carrega o numero embutido) — PII sob LGPD no stdout.
 // Ligue so para depurar um formato novo, e desligue depois.
 const LOG_PAYLOAD_RAW = (process.env.LOG_PAYLOAD_RAW || 'false') === 'true';
+// COMO a resposta chega ao lead. Por padrao ela volta no CORPO da requisicao
+// (`respostas`) e quem envia e a plataforma que chamou o webhook. Se a
+// plataforma NAO le o corpo da resposta, o lead fica sem receber nada: ligue
+// esta flag para a resposta sair pela Push API (CC_PUSH_URL), como antes da
+// migracao para request/response. Ligada, `respostas` volta vazio de proposito,
+// para a mensagem nao ser entregue duas vezes.
+const RESPOSTA_VIA_PUSH = (process.env.RESPOSTA_VIA_PUSH || 'false') === 'true';
 // Modelos da OpenAI por tarefa. Estavam fixos no meio do codigo, em quatro
 // lugares diferentes; agora sao uma decisao de configuracao.
 const MODELO_RESPOSTA  = process.env.MODELO_RESPOSTA  || 'gpt-4o-mini';
@@ -106,7 +113,7 @@ async function ccPush(number, payloadExtra = {}) {
     // resumo para a equipe (outro número) e follow-up de reativação (fora de
     // qualquer requisição) — continua saindo normalmente pela Push API.
     const cap = capturaCtx.getStore();
-    if (cap && !cap.expirado && payloadExtra.body
+    if (!RESPOSTA_VIA_PUSH && cap && !cap.expirado && payloadExtra.body
         && !payloadExtra.onlyNote && normalizarPhone(number) === cap.chatId) {
         cap.mensagens.push(String(payloadExtra.body));
         return true;
@@ -943,6 +950,13 @@ async function executarTurno(unidade) {
     }
     if (!captura.mensagens.length) {
         console.log('ℹ️ Turno de ' + unidade.chatId + ' não gerou resposta ao lead (encaminhamento, loop detectado ou turno silencioso).');
+    } else {
+        // Turno bem-sucedido nao logava NADA, entao "a IA nao responde" era
+        // indistinguivel de "a resposta nao chegou ao lead". Conta e tamanho
+        // bastam para separar os dois casos; o texto fica fora do log.
+        const chars = captura.mensagens.join('').length;
+        console.log('✅ Turno de ' + unidade.chatId + ' respondeu ' + captura.mensagens.length +
+                    ' mensagem(ns), ' + chars + ' chars.');
     }
     return {
         status: 'ok',
