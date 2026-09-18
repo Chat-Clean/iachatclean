@@ -30,6 +30,7 @@ REGRAS DE SEGURANÇA (NÃO NEGOCIÁVEIS):
 - Nunca encerre a conversa. Você nunca dá "tchau", "até mais" e afins. Mantenha o atendimento sempre aberto.
 - AGENDAMENTO: você NUNCA afirma que uma reunião foi marcada, agendada ou confirmada. Quem confirma o agendamento é o SISTEMA, com uma mensagem automática, e só depois que o cliente escolhe um horário da lista numerada. Você pode oferecer a reunião, perguntar a preferência de horário e pedir para o cliente escolher pelo número — mas nunca diga "agendei", "está marcada", "reunião confirmada", "deixei marcado" ou equivalentes por conta própria. Se o cliente disser um horário sem escolher um número da lista, peça gentilmente que ele confirme pelo número.
 - HORÁRIO DE REUNIÃO: você NUNCA cita horário por conta própria. A grade vem do Google Calendar e quem a apresenta é o SISTEMA, numerada ("1) ... 2) ..."). Se o cliente pedir horários e a lista numerada não tiver sido apresentada, responda que vai confirmar a agenda do time e já retorna — nunca invente "temos 10h, 14h e 16h", e nunca ofereça horário que já passou.
+- HORÁRIO DO TIME: segunda a sexta, das 9h às 18h (horário de Natal-RN), exceto feriados. Só diga que um especialista entra, fala ou responde "agora", "já", "rapidinho" ou "em instantes" quando o contexto da mensagem NÃO disser que estamos fora do horário. Fora dele, ninguém do time atende até o próximo expediente: diga quando o time retorna, nunca que alguém está a caminho.
 - PRODUTO WHATSAPP: o que a ChatClean oferece é a API Oficial da Meta (WhatsApp Business API / WABA). NUNCA ofereça, mencione ou sugira "API não oficial", "WhatsApp Web" ou qualquer solução alternativa como produto — isso não faz parte do nosso portfólio. Se o cliente disser que já usa o WhatsApp Business comum (o aplicativo), isso é a situação ATUAL dele, não algo que vendemos: o ganho que oferecemos é justamente a API Oficial, com vários atendentes no mesmo número, chatbot e CRM integrados.
 
 COMO LIDAR COM LINKS (COMPORTAMENTO OBRIGATÓRIO):
@@ -77,13 +78,13 @@ FLUXO SDR (guia de qualificação — colete uma info de cada vez, e sempre DEPO
 3) Dor: "Me fala um pouco no que está acontecendo na sua empresa. Em poucas palavras, quais são as maiores dores ou demandas que você tem em relação a ferramentas de tecnologia e ferramentas de gestão empresarial?"
 4) Urgência: "Você quer resolver isso agora ou está se planejando para os próximos dias?"
 5) Decisão: "Você decide isso ou tem mais alguém junto nesse processo?"
-6) Encaminhar para humano: "Perfeito! Já estou repassando tudo para um especialista da ChatClean. Ele entra aqui rapidinho para te atender melhor, combinado?"
+6) Encaminhar para humano: dentro do horário do time, "Perfeito! Já estou repassando tudo para um especialista da ChatClean. Ele entra aqui rapidinho para te atender melhor, combinado?". Fora do horário, siga o contexto da mensagem: diga quando o time retorna, sem prometer ninguém agora.
 
 NUNCA pergunte o nome da empresa, o segmento, a cidade/estado, os canais usados nem o volume de atendimentos. Se o cliente contar por conta própria, aproveite a informação — mas não pergunte. A triagem é curta de propósito: nome, dor, urgência e decisão.
 
 TENTATIVAS DE SAIR DO ESCOPO (conselhos pessoais, política, programação, jogos, piadas complexas etc.): "Esse assunto foge do meu atendimento. Mas posso te ajudar com dúvidas sobre a ChatClean, CRM ou atendimento digital."
 
-MANTER O ATENDIMENTO ABERTO: você nunca dá "tchau"/"até mais" nem diz que está encerrando. Mas isso NÃO significa terminar toda mensagem perguntando se pode ajudar em algo mais. As frases de "manter aberto" (ex.: "Se quiser, pode me mandar mais detalhes"; "Fico por aqui enquanto o especialista chega.") só devem aparecer QUANDO a conversa realmente pausa — o cliente agradeceu, disse que vai pensar, ou não há próximo passo — e, mesmo assim, no máximo uma vez, nunca a cada mensagem.`;
+MANTER O ATENDIMENTO ABERTO: você nunca dá "tchau"/"até mais" nem diz que está encerrando. Mas isso NÃO significa terminar toda mensagem perguntando se pode ajudar em algo mais. As frases de "manter aberto" (ex.: "Se quiser, pode me mandar mais detalhes"; "Fico por aqui se quiser adiantar algum detalhe.") só devem aparecer QUANDO a conversa realmente pausa — o cliente agradeceu, disse que vai pensar, ou não há próximo passo — e, mesmo assim, no máximo uma vez, nunca a cada mensagem.`;
 
 // -------------------------------------------------------------
 //  Prompt de EXTRAÇÃO de informações (gpt-4o-mini, temperature 0)
@@ -157,8 +158,9 @@ function promptResposta({ isInicioConversa, mensagemSanitizada, proximoCampo, le
     ].filter(Boolean).join(' | ') || 'nada ainda';
 
     // Fechamento diferente conforme o time está ou não em expediente.
-    // (A diferença de plantão aparece SÓ aqui — na hora de passar para o humano —
-    //  nunca durante a conversa; o resto do atendimento é igual em qualquer horário.)
+    // (A CONDUTA de plantão aparece SÓ aqui — na hora de passar para o humano. No
+    //  resto da conversa, fora do horário, entra apenas a linha que proíbe
+    //  prometer atendente a caminho: restrição, não mudança de roteiro.)
     const fechamentoAberto = '- Todos os dados foram coletados. Se você AINDA NÃO encaminhou nesta conversa, faça o passo 7 (encaminhar ao especialista) UMA vez, de forma calorosa. Se JÁ encaminhou (veja o histórico), NÃO repita — apenas responda ao que o cliente disse.';
     const fechamentoPlantao = `- É o momento de passar para um atendente humano, mas estamos FORA do horário (o time atende segunda a sexta, das 9h às 18h). NÃO diga que alguém entra "agora/rapidinho". Em vez disso, avise com naturalidade que o time retorna ${exp.proximoExpediente} e ofereça deixar uma reunião/retorno agendado com um especialista${leadData.horarioPreferido ? ' — o cliente já sugeriu ' + leadData.horarioPreferido + ', então confirme esse horário' : ', perguntando se ' + exp.proximoExpediente + ' fica bom ou se ele prefere outro horário'}. Faça isso UMA vez só.`;
 
@@ -184,7 +186,8 @@ ${perguntou
     ? '- O CLIENTE FEZ UMA PERGUNTA. Responda a dúvida dele de forma completa e natural, usando o conhecimento do sistema (API oficial, Instagram, integrações, suporte etc.). NESTA resposta, NÃO faça a próxima pergunta do fluxo e NÃO repita perguntas que você já fez — deixe a conversa fluir e retome a qualificação quando ele terminar de perguntar.' + (ehHandoff ? '\n' + linhaPasso : '')
     : linhaPasso}
 - Dados já coletados (NÃO pergunte de novo): ${coletados}
-${seg ? '- O cliente é do segmento ' + seg.nome + '. Se fizer sentido, conecte com: ' + seg.gancho : ''}
+${exp.aberto ? '' : `- Estamos FORA do horário do time (${HORARIO_DO_TIME}); ele volta ${exp.proximoExpediente}. Não precisa falar disso se o assunto não surgir, mas NUNCA diga que alguém do time entra, fala ou responde "agora", "já", "rapidinho" ou "em instantes".`}
+${seg ?'- O cliente é do segmento ' + seg.nome + '. Se fizer sentido, conecte com: ' + seg.gancho : ''}
 ${objecaoAtiva ? '- O cliente trouxe uma objeção. Contorne com naturalidade, SEM revelar preço: ' + objecaoAtiva : ''}
 ${leadData.naoEntendeuAgora ? '- ATENÇÃO: o cliente sinalizou que NÃO ENTENDEU ou que foi mal interpretado. NÃO repita a mesma pergunta com outras palavras — isso é o que mais faz o cliente desistir. Reconheça em poucas palavras, e então REFORMULE de forma mais simples e concreta, ou responda diretamente o que ele parece estar querendo saber.' : ''}
 ${usouNomeRecente ? '- IMPORTANTE: você JÁ chamou o cliente pelo nome nas mensagens recentes. NÃO use o nome dele nesta resposta.' : ''}
@@ -192,4 +195,53 @@ ${usouNomeRecente ? '- IMPORTANTE: você JÁ chamou o cliente pelo nome nas mens
 Escreva UMA única mensagem de WhatsApp, curta (máx. 2 linhas), seguindo todas as regras do sistema. Não escreva rótulos nem coloque o próximo passo entre colchetes.`;
 }
 
-module.exports = { SYSTEM_SDR, promptExtracao, promptResposta };
+// -------------------------------------------------------------
+//  Depois do encaminhamento e no transbordo ao Suporte, o que se promete
+//  depende do expediente. Fora do horário ninguém do time atende até o
+//  próximo dia útil; dizer "ele entra aqui rapidinho" à noite deixava o lead
+//  esperando à toa.
+// -------------------------------------------------------------
+const HORARIO_DO_TIME = 'segunda a sexta, das 9h às 18h';
+
+function promptPosEncaminhamento({ mensagemCliente, expediente }) {
+    const exp = expediente || estaEmExpediente();
+    const mensagem = String(mensagemCliente).replace(/[<>]/g, '').substring(0, 600);
+    const quandoDepende = exp.aberto
+        ? 'diga que ele já vai falar com o cliente pra resolver.'
+        : `diga que o especialista resolve isso com ele ${exp.proximoExpediente}.`;
+    return [
+        `Este lead já foi ENCAMINHADO a um especialista do Comercial da ChatClean. Ele acabou de dizer: "${mensagem}".`,
+        'Responda de forma breve, calorosa e útil (registro de WhatsApp, sem markdown, sem emoji):',
+        '- Se for uma dúvida simples sobre a ChatClean, responda.',
+        `- Se depender do especialista (preço, proposta, detalhes de contrato), ${quandoDepende}`,
+        exp.aberto
+            ? null
+            : `- AGORA estamos FORA do horário do time (${HORARIO_DO_TIME}). Ninguém do time fala com o cliente antes de ${exp.proximoExpediente}. NUNCA diga que alguém entra, fala ou responde "agora", "já", "rapidinho" ou "em instantes".`,
+        'Nunca passe preço. Não refaça perguntas de qualificação e não repita o resumo.'
+    ].filter(Boolean).join('\n');
+}
+
+// Usada quando o modelo falha ou quando a resposta dele promete atendente fora
+// do horário.
+function respostaPadraoPosEncaminhamento(expediente) {
+    const exp = expediente || estaEmExpediente();
+    return exp.aberto
+        ? 'Já repassei tudo pro nosso especialista, ele entra em contato aqui rapidinho. Se quiser adiantar algo, pode me contar que eu anoto pro time.'
+        : `Já repassei tudo pro nosso especialista. Nosso time volta ${exp.proximoExpediente} e fala com você por aqui. Se quiser adiantar algo, pode me contar que eu anoto pra ele.`;
+}
+
+function mensagemEncaminhamentoSuporte(expediente) {
+    const exp = expediente || estaEmExpediente();
+    return exp.aberto
+        ? 'Entendi! Vou te encaminhar pro nosso time de Suporte, que já cuida disso com você.'
+        : `Entendi! Vou te encaminhar pro nosso time de Suporte. Ele volta ${exp.proximoExpediente} e cuida disso com você por aqui.`;
+}
+
+module.exports = {
+    SYSTEM_SDR,
+    promptExtracao,
+    promptResposta,
+    promptPosEncaminhamento,
+    respostaPadraoPosEncaminhamento,
+    mensagemEncaminhamentoSuporte
+};

@@ -76,7 +76,14 @@ const RESET_INATIVIDADE = parseInt(process.env.RESET_INATIVIDADE_HORAS || '24', 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const { EMPRESA_INFO, SEGMENTOS, DEPARTAMENTOS } = require('./data');
-const { SYSTEM_SDR, promptExtracao, promptResposta } = require('./prompts');
+const {
+    SYSTEM_SDR,
+    promptExtracao,
+    promptResposta,
+    promptPosEncaminhamento,
+    respostaPadraoPosEncaminhamento,
+    mensagemEncaminhamentoSuporte
+} = require('./prompts');
 const { determinarProximoCampo, aplicarCampos, detectarSegmento, escolhaDeSlot, registrarTentativa } = require('./flow');
 const { estaEmExpediente } = require('./horario');
 const cal = require('./calendar'); // Google Calendar (inerte se não configurado)
@@ -297,8 +304,8 @@ async function extrairInformacoesComIA(mensagem, campoAtual, historicoRecente = 
 //  IA — GERAÇÃO DE RESPOSTA (gpt-4o-mini, temperatura 0.7)
 // =============================================================
 // Contexto que os analisadores precisam para as regras que dependem do
-// historico (nome repetido, pergunta repetida).
-function contextoDeQualidade(leadData) {
+// historico (nome repetido, pergunta repetida) e do expediente.
+function contextoDeQualidade(leadData, exp = null) {
     const primeiroNome = (leadData.nome || '').split(' ')[0];
     const respostasAnteriores = (leadData.conversationHistory || []).filter((h) => h.role === 'assistant');
     const ultima = respostasAnteriores[respostasAnteriores.length - 1];
@@ -313,14 +320,18 @@ function contextoDeQualidade(leadData) {
         ),
         perguntasAnteriores: respostasAnteriores
             .map((h) => extrairPergunta(h.content))
-            .filter(Boolean)
+            .filter(Boolean),
+        // Fora do horario, prometer atendente a caminho e promessa falsa.
+        expedienteAberto: exp ? exp.aberto : true,
+        proximoExpediente: exp ? exp.proximoExpediente : null
     };
 }
 
 async function gerarRespostaIA(leadData, mensagemCliente, proximoCampo, historicoRecente = [], expediente = null) {
     const mensagemSanitizada = mensagemCliente.replace(/[<>]/g, '').substring(0, 1000);
     const isInicioConversa = leadData.conversationHistory.length === 0;
-    const prompt = promptResposta({ isInicioConversa, mensagemSanitizada, proximoCampo, leadData, expediente });
+    const exp = expediente || estaEmExpediente();
+    const prompt = promptResposta({ isInicioConversa, mensagemSanitizada, proximoCampo, leadData, expediente: exp });
     const mensagens = [
         { role: 'system', content: SYSTEM_SDR },
         ...historicoRecente,
@@ -343,7 +354,7 @@ async function gerarRespostaIA(leadData, mensagemCliente, proximoCampo, historic
     // em 2 de 6 turnos do roteiro de pressao de preco, apesar de o prompt
     // proibir. Aqui a violacao critica vira uma segunda tentativa dirigida e,
     // se ela tambem falhar, uma resposta enlatada que nunca quebra a regra.
-    const ctx = contextoDeQualidade(leadData);
+    const ctx = contextoDeQualidade(leadData, exp);
     const veredito = guarda.avaliar(resposta, ctx);
     if (!veredito.ok) {
         const ids = veredito.corrigiveis.map((v) => v.id).join(', ');
@@ -399,14 +410,13 @@ Não invente o que não dá pra ver.`;
 
 // Resposta quando o lead JÁ foi encaminhado ao especialista: tira dúvidas
 // pontuais de forma natural, sem refazer a qualificação nem repetir o resumo.
-async function gerarRespostaPosEncaminhamento(leadData, mensagemCliente, historicoRecente = []) {
-    const fallback = 'Já repassei tudo pro nosso especialista, ele entra em contato aqui rapidinho 😊 Se quiser adiantar algo, pode me contar que eu anoto pro time.';
+// O expediente vale AGORA, nao o da hora do encaminhamento: o lead encaminhado
+// as 17h que escreve as 19h ja nao tem ninguem do time por perto.
+async function gerarRespostaPosEncaminhamento(leadData, mensagemCliente, historicoRecente = [], expediente = null) {
+    const exp = expediente || estaEmExpediente();
+    const fallback = respostaPadraoPosEncaminhamento(exp);
     try {
-        const prompt = `Este lead já foi ENCAMINHADO a um especialista do Comercial da ChatClean. Ele acabou de dizer: "${String(mensagemCliente).replace(/[<>]/g, '').substring(0, 600)}".
-Responda de forma breve, calorosa e útil (registro de WhatsApp, sem markdown, no máximo 1 emoji):
-- Se for uma dúvida simples sobre a ChatClean, responda.
-- Se depender do especialista (preço, proposta, detalhes de contrato), diga que ele já vai falar com o cliente pra resolver.
-Nunca passe preço. Não refaça perguntas de qualificação e não repita o resumo.`;
+        const prompt = promptPosEncaminhamento({ mensagemCliente, expediente: exp });
         const completion = await openai.chat.completions.create({
             model: MODELO_RESPOSTA,
             messages: [
@@ -416,7 +426,15 @@ Nunca passe preço. Não refaça perguntas de qualificação e não repita o res
             ],
             temperature: 0.6
         });
-        return completion.choices[0].message.content.trim() || fallback;
+        const resposta = completion.choices[0].message.content.trim();
+        if (!resposta) return fallback;
+        // Mesmo instruido, o modelo copia "ja vai falar com voce" do historico.
+        // Fora do horario isso e promessa falsa: cai na resposta padrao.
+        if (!naoPrometeAtendenteForaDoExpediente(resposta, contextoDeQualidade(leadData, exp)).ok) {
+            console.warn('Guarda: resposta pos-encaminhamento prometia atendente fora do expediente; usando a padrao.');
+            return fallback;
+        }
+        return resposta;
     } catch (e) {
         console.error('❌ Erro na resposta pós-encaminhamento:', e.message);
         return fallback;
@@ -815,7 +833,7 @@ async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, 
             // Cliente ATUAL pedindo suporte → encaminha para Suporte/CS (não é lead novo)
             if (extraido.tipoContato === 'cliente' && !leadData.finalizado) {
                 if (!usuarioNoHistorico) leadData.conversationHistory.push({ role: 'user', content: texto });
-                await enviarMensagem(chatId, 'Entendi! Vou te encaminhar pro nosso time de Suporte, que já cuida disso com você.');
+                await enviarMensagem(chatId, mensagemEncaminhamentoSuporte(exp));
                 await notificarEquipe(leadData, chatId, { departamento: DEPARTAMENTOS.suporte, tagExtra: 'CLIENTE ATUAL' });
                 leadData.finalizado = true;
                 return;
@@ -1045,7 +1063,7 @@ function agruparEProcessar(parsed) {
 // =============================================================
 const acl = require('./src/infrastructure/chatclean/acl/tradutor');
 const guarda = require('./src/domain/qualidade/guarda');
-const { extrairPergunta } = require('./src/domain/qualidade/analisadores');
+const { extrairPergunta, naoPrometeAtendenteForaDoExpediente } = require('./src/domain/qualidade/analisadores');
 const { MOTIVOS } = require('./src/domain/mensageria/MotivoDeDescarte');
 const { resumoSeguro } = require('./src/shared/resumoDePayload');
 const { criarRegistroDeTurnos } = require('./src/shared/registroDeTurnos');

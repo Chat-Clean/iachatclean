@@ -75,7 +75,10 @@ describe('guarda de resposta', () => {
     });
 
     it('toda resposta segura termina com pergunta, para nao matar a conversa', () => {
-        for (const texto of Object.values(RESPOSTAS_SEGURAS)) {
+        // Algumas dependem do contexto (ex.: quando o time volta).
+        const ctx = { expedienteAberto: false, proximoExpediente: 'amanhã às 9h' };
+        for (const valor of Object.values(RESPOSTAS_SEGURAS)) {
+            const texto = typeof valor === 'function' ? valor(ctx) : valor;
             expect(texto.trim().endsWith('?')).toBe(true);
         }
     });
