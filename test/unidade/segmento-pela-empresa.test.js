@@ -30,20 +30,30 @@ describe('segmento deduzido do nome da empresa', () => {
         expect(inferirSegmentoDaEmpresa(null)).toBe(null);
     });
 
-    // O segmento deixou de ser PERGUNTADO na triagem curta, mas continua sendo
-    // deduzido: alimenta o gancho de case e o resumo que a equipe recebe.
-    it('deduz o segmento sem gerar pergunta nova no funil', () => {
+    // O segmento vale mais que o nome da empresa, mas so e PERGUNTADO quando o
+    // nome nao o revela.
+    it('pede a empresa antes de pensar no segmento', () => {
+        expect(determinarProximoCampo({ nome: 'Joao' }).campo).toBe('empresa');
+    });
+
+    it('nome que entrega o ramo pula a pergunta do segmento', () => {
         const lead = { nome: 'Joao' };
         aplicarCampos(lead, { empresa: 'Pizzaria 3 Irmãos' });
         expect(lead.segmento).toBe('alimentação');
         expect(determinarProximoCampo(lead).campo).toBe('dor');
     });
 
-    it('nome sem pista nao deduz, e o funil segue igual', () => {
+    it('o extrator entregando o segmento junto com a empresa tambem pula a pergunta', () => {
+        const lead = { nome: 'Joao' };
+        aplicarCampos(lead, { empresa: 'Studio Bella', segmento: 'salão de beleza' });
+        expect(determinarProximoCampo(lead).campo).toBe('dor');
+    });
+
+    it('nome sem pista nao deduz, e ai o segmento e perguntado', () => {
         const lead = { nome: 'Joao' };
         aplicarCampos(lead, { empresa: 'Silva & Filhos' });
         expect(lead.segmento).toBeUndefined();
-        expect(determinarProximoCampo(lead).campo).toBe('dor');
+        expect(determinarProximoCampo(lead).campo).toBe('segmento');
     });
 
     it('nao sobrescreve o segmento que o cliente informou', () => {

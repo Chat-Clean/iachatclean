@@ -21,7 +21,16 @@ const { analisar } = require('./analisadores');
 
 // Só o que causa dano real de negócio entra aqui. Estilo (emoji, linhas) não
 // justifica uma segunda chamada ao modelo.
-const CRITICAS = new Set(['nao-revela-preco', 'nao-revela-ser-ia', 'nao-afirma-agendamento', 'nao-inventa-horario']);
+const CRITICAS = new Set([
+    'nao-revela-preco',
+    'nao-revela-ser-ia',
+    'nao-afirma-agendamento',
+    'nao-promete-atendente-fora-do-expediente',
+    'nao-inventa-horario'
+]);
+
+// Quando o time volta, para as mensagens de fora do expediente.
+const quandoOTimeVolta = (contexto) => contexto.proximoExpediente || 'no próximo dia útil';
 const ALTAS_CORRIGIVEIS = new Set(['nao-nega-ler-links', 'nao-nega-ver-imagens', 'sem-dispensa', 'nao-repete-pergunta']);
 
 const INSTRUCOES = {
@@ -34,6 +43,12 @@ const INSTRUCOES = {
     'nao-afirma-agendamento':
         'Você afirmou que a reunião está marcada. Quem confirma é o sistema, depois que o cliente escolhe um horário pelo número. ' +
         'Reescreva pedindo que ele escolha pelo número.',
+    // Depende do contexto: o texto diz QUANDO o time volta.
+    'nao-promete-atendente-fora-do-expediente': (contexto) =>
+        'Estamos FORA do horário do time (segunda a sexta, das 9h às 18h). Você prometeu que alguém atende agora, ' +
+        `e ninguém do time atende antes de ${quandoOTimeVolta(contexto)}. ` +
+        'Reescreva sem prometer atendimento imediato ("rapidinho", "já vai falar", "em instantes"): ' +
+        `diga que o time retorna ${quandoOTimeVolta(contexto)}.`,
     'nao-inventa-horario':
         'Você citou um horário. NUNCA invente horário de reunião: a grade vem do Google Calendar e quem a oferece é o sistema, numerada. ' +
         'Reescreva dizendo que vai confirmar a agenda do time e já retorna com os horários.',
@@ -58,6 +73,9 @@ const RESPOSTAS_SEGURAS = {
         'Me conta: o que você quer melhorar hoje no seu atendimento?',
     'nao-afirma-agendamento':
         'Para eu seguir certinho, me diz o número do horário que ficou melhor pra você?',
+    'nao-promete-atendente-fora-do-expediente': (contexto) =>
+        `Nosso time atende de segunda a sexta, das 9h às 18h, e retorna ${quandoOTimeVolta(contexto)}. ` +
+        'Quer me adiantar algum detalhe pra eu deixar anotado pra ele?',
     'nao-inventa-horario':
         'Deixa eu confirmar a agenda do time e já te passo os horários certinhos. Pode ser?'
 };
@@ -84,9 +102,12 @@ function avaliar(resposta, contexto = {}, opcoes = {}) {
         return { ok: true, violacoes, corrigiveis: [], instrucaoDeCorrecao: null, respostaSegura: null };
     }
 
+    // Instrução e resposta segura podem ser texto fixo ou depender do contexto.
+    const resolver = (valor) => (typeof valor === 'function' ? valor(contexto) : valor);
+
     const instrucaoDeCorrecao =
         'A resposta que você acabou de escrever quebrou uma regra. Reescreva a MESMA mensagem corrigindo:\n' +
-        corrigiveis.map((v) => '- ' + (INSTRUCOES[v.id] || v.id)).join('\n') +
+        corrigiveis.map((v) => '- ' + (resolver(INSTRUCOES[v.id]) || v.id)).join('\n') +
         '\nMantenha o tom, o assunto e o tamanho (máx. 2 linhas). Responda só com a mensagem corrigida.';
 
     // A resposta segura cobre a violação mais grave que tenha uma.
@@ -97,7 +118,7 @@ function avaliar(resposta, contexto = {}, opcoes = {}) {
         violacoes,
         corrigiveis,
         instrucaoDeCorrecao,
-        respostaSegura: comSegura ? RESPOSTAS_SEGURAS[comSegura.id] : null
+        respostaSegura: comSegura ? resolver(RESPOSTAS_SEGURAS[comSegura.id]) : null
     };
 }
 

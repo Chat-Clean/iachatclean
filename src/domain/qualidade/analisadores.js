@@ -153,6 +153,41 @@ function naoAfirmaAgendamento(resposta) {
     return RESULTADO('nao-afirma-agendamento', 'critica', !achada, achada || null);
 }
 
+// Fora do expediente (seg a sex, 9h-18h de Natal-RN) ninguem do time atende ate
+// o proximo dia util. O roteiro trazia "Ele entra aqui rapidinho" e o modelo
+// repetia a frase a noite: o lead esperava um atendente que so chegava no dia
+// seguinte. Os padroes sao escritos sem acento porque o texto e normalizado.
+const PROMESSAS_DE_ATENDIMENTO_IMEDIATO = [
+    /\bentra aqui\b/,
+    /\bentra em contato aqui\b/,
+    /\benquanto (o especialista|o time|a equipe|ele) (chega|nao chega)\b/,
+    /\bja (vai|vao|esta|estao) (te |lhe )?(atender|chamar|falar|entrar|responder|vindo|chegando)\b/,
+    /\bja (te|lhe) (atende|chama|responde)\b/,
+    /\bja fala com voce\b/,
+    /\ba caminho\b/,
+    /\bja ja\b/,
+    /\bem (alguns |poucos )?instantes\b/,
+    /\bem poucos minutos\b/,
+    /\bdaqui a pouco\b/,
+    /\b(entra|chega|atende|fala|responde|chama)\b[^.!?\n]{0,30}\brapidinho\b/
+];
+
+function semAcento(texto) {
+    return String(texto)
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[̀-ͯ]/g, '');
+}
+
+function naoPrometeAtendenteForaDoExpediente(resposta, contexto = {}) {
+    const id = 'nao-promete-atendente-fora-do-expediente';
+    // Sem contexto de expediente (eval, chamadas antigas) vale o horario comercial.
+    if (contexto.expedienteAberto !== false) return RESULTADO(id, 'critica', true);
+    const t = semAcento(resposta);
+    const achada = PROMESSAS_DE_ATENDIMENTO_IMEDIATO.map((re) => t.match(re)).find(Boolean);
+    return RESULTADO(id, 'critica', !achada, achada ? achada[0] : null);
+}
+
 // Quem oferece horario e o SISTEMA, com a grade numerada vinda do Google
 // Calendar. Quando o Calendar falha ou nao devolve slot, o fluxo entrega a
 // conversa ao modelo — e ele inventava ("Temos 10h, 14h e 16h"), inclusive
@@ -160,9 +195,16 @@ function naoAfirmaAgendamento(resposta) {
 // (?<!\d) evita casar o "4h" de "24h" (ex.: "suporte 24h").
 const RE_HORARIO = /(?<!\d)(?:[01]?\d|2[0-3])\s*(?:h(?:oras?)?\b|:[0-5]\d\b)/i;
 
+// Fora do expediente o bot PRECISA dizer quando o time volta ("amanha as 9h") e
+// pode citar o horario comercial ("das 9h as 18h"). Essas horas sao do
+// expediente, nao de reuniao.
+const RE_HORAS_DO_EXPEDIENTE = /(?<!\d)(?:0?9|18)\s*(?:h(?:oras?)?\b|:00\b)/gi;
+
 function naoInventaHorario(resposta, contexto = {}) {
     if (contexto.sistemaOfereceuHorarios) return RESULTADO('nao-inventa-horario', 'critica', true);
-    const m = String(resposta).match(RE_HORARIO);
+    let t = String(resposta);
+    if (contexto.expedienteAberto === false) t = t.replace(RE_HORAS_DO_EXPEDIENTE, '');
+    const m = t.match(RE_HORARIO);
     return RESULTADO('nao-inventa-horario', 'critica', !m, m ? m[0] : null);
 }
 
@@ -250,6 +292,9 @@ const ANALISADORES = [
     naoRevelaSerIA,
     naoRevelaPreco,
     naoAfirmaAgendamento,
+    // Antes de naoInventaHorario: quando as duas reprovam, a resposta segura
+    // escolhida e a que diz quando o time volta.
+    naoPrometeAtendenteForaDoExpediente,
     naoInventaHorario,
     naoNegaLerLinks,
     naoNegaVerImagens,
@@ -286,6 +331,7 @@ module.exports = {
     naoRevelaSerIA,
     naoRevelaPreco,
     naoAfirmaAgendamento,
+    naoPrometeAtendenteForaDoExpediente,
     naoInventaHorario,
     naoNegaLerLinks,
     naoNegaVerImagens,
