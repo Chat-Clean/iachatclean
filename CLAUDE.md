@@ -8,8 +8,8 @@ Contexto permanente para qualquer agente que trabalhe neste repositório.
 ## O que é este projeto
 
 SDR virtual (IA de pré-vendas) da **ChatClean**, plataforma de CRM e atendimento digital
-multicanal. Atende leads pelo WhatsApp, qualifica (nome, empresa, segmento, objetivo, canais,
-volume, dor, urgência), **agenda reunião no Google Calendar**, cria a **oportunidade no funil do
+multicanal. Atende leads pelo WhatsApp, qualifica (nome, empresa, segmento só quando o nome da
+empresa não o revela, dor, urgência, decisor), **agenda reunião no Google Calendar**, cria a **oportunidade no funil do
 CRM** e transfere para o time comercial.
 
 O transporte é a plataforma **ChatClean**. Desde a migração para request/response, a resposta ao

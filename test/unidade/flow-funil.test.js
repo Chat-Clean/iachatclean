@@ -7,6 +7,8 @@ const flow = require('../../flow.js');
 const leadCompletoMenos = (faltando) => {
     const lead = {
         nome: 'Joao',
+        empresa: 'Silva & Filhos',
+        segmento: 'varejo',
         dor: 'demora pra responder',
         urgencia: 'agora',
         decisor: 'sozinho'
@@ -16,15 +18,18 @@ const leadCompletoMenos = (faltando) => {
 };
 
 describe('ordem do funil', () => {
-    // Triagem encurtada: nome, dor, urgencia, decisor. Nada mais e perguntado.
-    it('pede nome primeiro, dor depois', () => {
+    // Triagem: nome, empresa, segmento (so se o nome da empresa nao revelar o
+    // ramo), dor, urgencia, decisor.
+    it('pede nome, depois a empresa, depois o segmento, depois a dor', () => {
         expect(flow.determinarProximoCampo({}).campo).toBe('nome');
-        expect(flow.determinarProximoCampo({ nome: 'Joao' }).campo).toBe('dor');
+        expect(flow.determinarProximoCampo({ nome: 'Joao' }).campo).toBe('empresa');
+        expect(flow.determinarProximoCampo({ nome: 'Joao', empresa: 'Silva & Filhos' }).campo).toBe('segmento');
+        expect(flow.determinarProximoCampo({ nome: 'Joao', empresa: 'Silva & Filhos', segmento: 'varejo' }).campo).toBe('dor');
     });
 
-    it('nao pergunta empresa, segmento, cidade, canais nem volume', () => {
+    it('nao pergunta cidade, canais, volume nem objetivo', () => {
         const perguntados = flow.CAMPOS;
-        for (const campo of ['empresa', 'segmento', 'cidadeEstado', 'canais', 'volume', 'objetivo']) {
+        for (const campo of ['cidadeEstado', 'canais', 'volume', 'objetivo']) {
             expect(perguntados).not.toContain(campo);
         }
     });
@@ -34,7 +39,8 @@ describe('ordem do funil', () => {
         flow.aplicarCampos(lead, { nome: 'Joao', empresa: 'Padaria Pao Quente', cidadeEstado: 'Natal-RN' });
         expect(lead.empresa).toBe('Padaria Pao Quente');
         expect(lead.cidadeEstado).toBe('Natal-RN');
-        // Capturar empresa NAO gera pergunta nova: o proximo campo segue sendo a dor.
+        // Cidade capturada NAO gera pergunta nova, e "Padaria" ja entrega o
+        // segmento: o proximo campo e a dor.
         expect(flow.determinarProximoCampo(lead).campo).toBe('dor');
     });
 
@@ -50,7 +56,7 @@ describe('campo recusado nao trava o funil', () => {
     // campo null para sempre. qualificacaoCompleta nunca virava true e o
     // encaminhamento ao especialista NUNCA disparava.
     it('insiste no campo ate o limite e depois segue em frente', () => {
-        const lead = { nome: 'Joao' };
+        const lead = { nome: 'Joao', empresa: 'Silva & Filhos', segmento: 'varejo' };
 
         expect(flow.determinarProximoCampo(lead).campo).toBe('dor');
         flow.registrarTentativa(lead, 'dor');
@@ -86,7 +92,7 @@ describe('campo recusado nao trava o funil', () => {
     });
 
     it('respeita um limite customizado', () => {
-        const lead = { nome: 'y' };
+        const lead = { nome: 'y', empresa: 'z', segmento: 'varejo' };
         flow.registrarTentativa(lead, 'dor');
         expect(flow.determinarProximoCampo(lead, { maxTentativas: 1 }).campo).toBe('urgencia');
         expect(flow.determinarProximoCampo(lead, { maxTentativas: 5 }).campo).toBe('dor');
