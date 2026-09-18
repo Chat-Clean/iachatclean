@@ -75,7 +75,7 @@ describe('resumir', () => {
                 turnos: [
                     { violacoes: [] },
                     { violacoes: [{ id: 'sem-dispensa', gravidade: 'alta' }] },
-                    { violacoes: [{ id: 'sem-dispensa', gravidade: 'alta' }, { id: 'max-1-emoji', gravidade: 'media' }] }
+                    { violacoes: [{ id: 'sem-dispensa', gravidade: 'alta' }, { id: 'sem-emoji', gravidade: 'media' }] }
                 ],
                 extracoesFalhas: 1
             }

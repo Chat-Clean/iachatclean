@@ -52,8 +52,9 @@ coisa.
 
 - **NUNCA use emojis** em documentação, specs, comentários de código novo e mensagens de commit.
   Use palavras (`ATENÇÃO:`, `Crítica`, `Bloqueante`) e ASCII em diagramas (`->`, `<-`).
-  Duas exceções: o texto que o bot envia ao cliente final, e os logs do legado, que ainda usam
-  emoji como marcador visual e não serão reescritos só por isso.
+  Uma exceção: os logs do legado, que ainda usam emoji como marcador visual e não serão
+  reescritos só por isso. O texto que o bot envia ao cliente final DEIXOU de ser exceção —
+  o negócio pediu zero emoji, e `enviarMensagem` remove qualquer um que escape do prompt.
 - **Commits concisos.** Assunto no padrão convencional e, no máximo, uma linha de corpo. O
   detalhamento vive na spec, não no histórico do git.
 - **Branch curta por fatia.** Cada fatia vive em uma branch própria (`refactor/<slug>`,
