@@ -4,22 +4,24 @@
 //  (test-chat.js) para não haver drift. Sem I/O, sem OpenAI.
 // =============================================================
 
-// Ordem oficial do fluxo. A triagem foi ENCURTADA a pedido do negocio: nome,
-// depois a dor em uma pergunta aberta, e so o que qualifica comercialmente
-// (urgencia e decisor). Perguntar nome da empresa, segmento, cidade, canais e
-// volume alongava a triagem sem ajudar o especialista, que levanta isso na
-// reuniao.
-const CAMPOS = ['nome', 'dor', 'urgencia', 'decisor'];
+// Ordem oficial do fluxo. A triagem e CURTA a pedido do negocio: nome, empresa,
+// a dor em uma pergunta aberta, e so o que qualifica comercialmente (urgencia e
+// decisor). O segmento vale mais que o nome da empresa, mas so e PERGUNTADO
+// quando o nome nao o revela: aplicarCampos deduz o ramo de "Pizzaria 3 Irmaos"
+// e determinarProximoCampo pula o campo ja preenchido.
+const CAMPOS = ['nome', 'empresa', 'segmento', 'dor', 'urgencia', 'decisor'];
 
 // Nunca PERGUNTADOS, mas capturados quando o cliente fala por conta propria:
-// alimentam o CRM (nome da oportunidade), o gancho de case e o resumo da equipe.
-const CAMPOS_SO_CAPTURA = ['objetivo', 'empresa', 'segmento', 'cidadeEstado', 'canais', 'volume'];
+// alimentam o gancho de case e o resumo da equipe.
+const CAMPOS_SO_CAPTURA = ['objetivo', 'cidadeEstado', 'canais', 'volume'];
 
 const CAMPOS_APLICAVEIS = [...CAMPOS, ...CAMPOS_SO_CAPTURA];
 
 const PERGUNTAS = {
     nome:         'Pergunte o nome dele.',
-    dor:          'Faça exatamente esta pergunta, com suas palavras mas sem perder nada: me fala um pouco no que está acontecendo na sua empresa; em poucas palavras, quais são as maiores dores ou demandas que você tem em relação a ferramentas de tecnologia e ferramentas de gestão empresarial.',
+    empresa:      'Pergunte o nome da empresa dele.',
+    segmento:     'O nome da empresa não deixou o ramo claro: pergunte em qual ramo/segmento a empresa atua.',
+    dor:         'Faça exatamente esta pergunta, com suas palavras mas sem perder nada: me fala um pouco no que está acontecendo na sua empresa; em poucas palavras, quais são as maiores dores ou demandas que você tem em relação a ferramentas de tecnologia e ferramentas de gestão empresarial.',
     urgencia:     'Pergunte se ele quer resolver isso agora ou está se planejando para os próximos dias.',
     decisor:      'Pergunte se ele decide sozinho ou tem mais alguém nesse processo.'
 };
