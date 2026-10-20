@@ -66,6 +66,19 @@ describe('executor de eval', () => {
         expect(r.turnos[0].violacoes.map((v) => v.id)).not.toContain('nao-repete-pergunta');
         expect(r.turnos[1].violacoes.map((v) => v.id)).toContain('nao-repete-pergunta');
     });
+
+    // CA-001 (spec 0001): mesma contagem de tentativas de index.js.
+    it('desiste do campo depois de MAX_TENTATIVAS, como producao', async () => {
+        const campos = [];
+        const executor = criarExecutor({
+            conversar: fakeLLM(['Entendi.']),
+            prompts: { ...promptsFake, promptResposta: ({ proximoCampo }) => { campos.push(proximoCampo && proximoCampo.campo); return 'responda'; } },
+            flow
+        });
+        await executor.rodarRoteiro({ id: 'recusa', falas: ['oi', 'nao vou dizer', 'prefiro nao'] });
+        expect(campos[0]).toBe(campos[1]);
+        expect(campos[2]).not.toBe(campos[0]);
+    });
 });
 
 describe('resumir', () => {
