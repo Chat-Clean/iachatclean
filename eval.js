@@ -15,6 +15,7 @@ const prompts = require('./prompts');
 const flow = require('./flow');
 const { ROTEIROS, porId } = require('./src/eval/roteiros');
 const { criarExecutor, resumir } = require('./src/eval/executar');
+const { criarCompletar } = require('./src/infrastructure/openai/completar');
 
 if (!process.env.OPENAI_API_KEY) {
     console.error('Defina OPENAI_API_KEY no .env antes de rodar o eval.');
@@ -23,25 +24,38 @@ if (!process.env.OPENAI_API_KEY) {
 
 const MODELO = process.env.MODELO_EVAL || 'gpt-4o-mini';
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const { completar } = criarCompletar({ cliente: openai });
+// Mesmo esforco por tarefa da producao. Sem prazo de proposito: o eval mede
+// quanto o esforco escolhido demora de fato.
+const ESFORCO = {
+    resposta: process.env.MODELO_ESFORCO_RESPOSTA || '',
+    extracao: process.env.MODELO_ESFORCO_APOIO || 'low',
+};
 
 let chamadas = 0;
 
 // Porta do LLM: o executor não sabe que existe OpenAI.
-async function conversar({ system, mensagens, prompt, temperatura }) {
+// Latencia por tarefa: a API e sincrona e o lead espera, entao tempo e
+// criterio de escolha de modelo tanto quanto as violacoes.
+const latencias = {};
+function resumoDeLatencia(ms) {
+    const ord = [...ms].sort((a, b) => a - b);
+    const p = (q) => ord[Math.min(ord.length - 1, Math.floor(q * ord.length))];
+    const s = (v) => (v / 1000).toFixed(1) + 's';
+    return `mediana ${s(p(0.5))}, p90 ${s(p(0.9))}, max ${s(ord.at(-1))} (${ms.length} chamadas)`;
+}
+
+async function conversar({ system, mensagens, prompt, temperatura, tarefa }) {
     chamadas++;
     const messages = [];
     if (system) messages.push({ role: 'system', content: system });
     messages.push(...mensagens);
     messages.push({ role: 'user', content: prompt });
-    // A familia gpt-5 so aceita a temperatura padrao; cair de volta sem o
-    // parametro deixa o mesmo eval comparar modelos de geracoes diferentes.
-    let c;
-    try {
-        c = await openai.chat.completions.create({ model: MODELO, messages, temperature: temperatura });
-    } catch (e) {
-        if (!/temperature/i.test(e.message || "")) throw e;
-        c = await openai.chat.completions.create({ model: MODELO, messages });
-    }
+    // Mesmo adaptador da producao: modelos de raciocinio perdem a temperatura e
+    // recebem o mesmo esforco, entao o eval mede o que o lead vai receber.
+    const inicio = Date.now();
+    const c = await completar({ model: MODELO, messages, temperature: temperatura, reasoning_effort: ESFORCO[tarefa] || '' });
+    (latencias[tarefa] = latencias[tarefa] || []).push(Date.now() - inicio);
     return c.choices[0].message.content.trim();
 }
 
@@ -66,7 +80,7 @@ async function main() {
         expediente: { aberto: true, proximoExpediente: 'amanhã de manhã' }
     });
 
-    console.log(`\nModelo: ${MODELO}`);
+    console.log(`\nModelo: ${MODELO} | esforco resposta: ${ESFORCO.resposta || 'padrao'}, extracao: ${ESFORCO.extracao}`);
     console.log(`Roteiros: ${roteiros.map((r) => r.id).join(', ')}\n`);
 
     const execucoes = [];
@@ -83,6 +97,7 @@ async function main() {
     console.log(`\n--- PLACAR (${MODELO}) ---`);
     console.log(`Turnos limpos: ${r.turnosLimpos}/${r.turnos} (${r.percentualLimpo}%)`);
     console.log(`Violações: ${r.porGravidade.critica} críticas, ${r.porGravidade.alta} altas, ${r.porGravidade.media} médias`);
+    for (const [tarefa, ms] of Object.entries(latencias)) console.log(`Latencia ${tarefa}: ${resumoDeLatencia(ms)}`);
     if (r.extracoesFalhas) console.log(`Extrações que não voltaram JSON: ${r.extracoesFalhas}`);
     // Sinal nao e violacao: o prompt permite terminar so com a informacao.
     console.log(`Sinais (nao contam como violacao): ${r.sinais} turnos sem pergunta no final`);
