@@ -14,7 +14,7 @@ const { analisar, extrairPergunta } = require('../domain/qualidade/analisadores'
 
 /**
  * @param {object} deps
- * @param {(args: {system: string, mensagens: Array, prompt: string, temperatura: number}) => Promise<string>} deps.conversar
+ * @param {(args: {system: string, mensagens: Array, prompt: string, temperatura: number, tarefa: 'extracao' | 'resposta'}) => Promise<string>} deps.conversar
  *        Porta do LLM: recebe o pedido e devolve o texto da resposta.
  * @param {object} deps.prompts  { SYSTEM_SDR, promptExtracao, promptResposta }
  * @param {object} deps.flow     { determinarProximoCampo, aplicarCampos, detectarSegmento }
@@ -28,7 +28,7 @@ function criarExecutor({ conversar, prompts, flow, expediente }) {
             mensagemSanitizada: String(mensagem).replace(/[<>]/g, '').substring(0, 1000),
             campoAtual
         });
-        const cru = await conversar({ system: null, mensagens: historico.slice(-4), prompt, temperatura: 0 });
+        const cru = await conversar({ system: null, mensagens: historico.slice(-4), prompt, temperatura: 0, tarefa: 'extracao' });
         try {
             const limpo = String(cru).replace(/```json?/g, '').replace(/```/g, '').trim();
             return JSON.parse(limpo);
@@ -51,7 +51,8 @@ function criarExecutor({ conversar, prompts, flow, expediente }) {
             system: prompts.SYSTEM_SDR,
             mensagens: historico.slice(-10),
             prompt,
-            temperatura: 0.7
+            temperatura: 0.7,
+            tarefa: 'resposta'
         });
     }
 
