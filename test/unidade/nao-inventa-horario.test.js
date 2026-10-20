@@ -37,6 +37,20 @@ describe('bot nao inventa horario de reuniao', () => {
         expect(v.instrucaoDeCorrecao).toMatch(/NUNCA invente horário/);
     });
 
+    // CA-002 (spec 0001): caso real do eval com gpt-6-luna e expediente aberto.
+    it('horario do time nao e horario inventado, com expediente aberto ou fechado', () => {
+        const real = 'Nosso time humano atende de segunda a sexta, das 9h às 18h, no horário de Natal.';
+        expect(naoInventaHorario(real).ok).toBe(true);
+        expect(naoInventaHorario(real, { expedienteAberto: false }).ok).toBe(true);
+        expect(naoInventaHorario('Atendemos das 9 às 18h.').ok).toBe(true);
+        expect(naoInventaHorario('Funcionamos 9h-18h.').ok).toBe(true);
+    });
+
+    it('a faixa do expediente nao esconde hora de reuniao inventada', () => {
+        expect(naoInventaHorario('O time atende das 9h às 18h e tenho 15h livre pra reunião.').ok).toBe(false);
+        expect(naoInventaHorario('Posso marcar às 9h amanhã?').ok).toBe(false);
+    });
+
     it('resposta sem horario passa', () => {
         const r = naoInventaHorario('Vou confirmar a agenda do time e já te retorno com os horários.');
         expect(r.ok).toBe(true);

@@ -116,7 +116,18 @@ const REVELACOES_DE_IA = [
     'como uma ia',
     'fui treinado',
     'meu prompt',
-    'minhas instruções'
+    'minhas instruções',
+    // "Tem um humano do outro lado?" -> "voce esta falando com o atendimento
+    // virtual da ChatClean" (gpt-6-luna, eval de 2026-10-20). Mesmo dano.
+    'falando com o atendimento virtual',
+    'falando com um atendimento virtual',
+    'falando com o assistente virtual',
+    'falando com um assistente virtual',
+    'sou um assistente virtual',
+    'sou o assistente virtual',
+    'falando com uma ia',
+    'falando com um robô',
+    'falando com um bot'
 ];
 
 function naoRevelaSerIA(resposta) {
@@ -199,10 +210,14 @@ const RE_HORARIO = /(?<!\d)(?:[01]?\d|2[0-3])\s*(?:h(?:oras?)?\b|:[0-5]\d\b)/i;
 // pode citar o horario comercial ("das 9h as 18h"). Essas horas sao do
 // expediente, nao de reuniao.
 const RE_HORAS_DO_EXPEDIENTE = /(?<!\d)(?:0?9|18)\s*(?:h(?:oras?)?\b|:00\b)/gi;
+// A FAIXA do horario do time ("das 9h as 18h") esta no proprio SYSTEM_SDR e vale
+// com o expediente aberto tambem: o lead pergunta quando o time atende. Antes
+// disto a guarda trocava essa resposta por "vou confirmar a agenda do time".
+const RE_FAIXA_DO_EXPEDIENTE = /(?<!\d)0?9\s*(?:h(?:oras?)?)?\s*(?:às|as|a|até|ate|-)\s*18\s*(?:h(?:oras?)?\b|:00\b)/gi;
 
 function naoInventaHorario(resposta, contexto = {}) {
     if (contexto.sistemaOfereceuHorarios) return RESULTADO('nao-inventa-horario', 'critica', true);
-    let t = String(resposta);
+    let t = String(resposta).replace(RE_FAIXA_DO_EXPEDIENTE, '');
     if (contexto.expedienteAberto === false) t = t.replace(RE_HORAS_DO_EXPEDIENTE, '');
     const m = t.match(RE_HORARIO);
     return RESULTADO('nao-inventa-horario', 'critica', !m, m ? m[0] : null);
