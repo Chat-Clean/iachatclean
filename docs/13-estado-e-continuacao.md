@@ -97,7 +97,8 @@ Ordem: teste de caracterização de `ccPush` -> porta + fake -> adapter real -> 
 | D-09 | Com `temperature: 0.7` o placar varia entre execucoes. So a medicao de vazamento de preco foi repetida (5x). | Numero de execucao unica e anedota, nao estatistica. |
 | D-10 | O log `📩 <numero> [tipo]: "<texto>"` continua imprimindo telefone e conteúdo da mensagem no stdout. É log do legado, útil para operação, mas é PII sob LGPD. | O payload bruto já foi fechado (`LOG_PAYLOAD_RAW=false`); esta linha ficou. Decidir se mascara o número (`5584****0845`) ou se some com o texto. |
 | D-08 | `MODELO_RESPOSTA` no `.env.example` sugere `gpt-4.1-mini`, mas o padrao no codigo continua `gpt-4o-mini` para nao mudar producao sem decisao. | Producao segue no modelo que inventa preco, protegida so pela guarda. |
-| D-11 | Dentro do expediente, `nao-inventa-horario` barra resposta legitima sobre o horario do time ("atendemos das 9h as 18h"). Fora do expediente as horas do expediente ja sao aceitas (#25). | O lead que pergunta o horario de atendimento recebe "vou confirmar a agenda do time". Liberar 9h/18h tambem no horario e mudanca de comportamento: precisa de decisao. |
+| D-11 | ~~Dentro do expediente, `nao-inventa-horario` barra resposta legitima sobre o horario do time.~~ **Resolvida na spec 0001:** a faixa "das 9h as 18h" passa com o expediente aberto ou fechado; hora solta continua reprovando. | — |
+| D-12 | `semelhantes` compara por palavras de conteudo, e pergunta curta tem uma so: "Qual seu nome?" e "Me diz o nome da sua empresa?" viram repeticao (100% de "nome"). | Falso `nao-repete-pergunta` no eval e regeneracao desnecessaria na guarda de producao. |
 
 ## Como validar que nada quebrou
 

@@ -30,3 +30,4 @@ specs/
 | Spec | Assunto | Estado |
 |---|---|---|
 | — | Fases 0 e 1 foram executadas direto, com teste de caracterizacao antes de cada extracao | concluidas |
+| [0001](0001-prompt-gpt-6-luna/spec.md) | Prompt e medicao prontos para o gpt-6-luna | concluida |
