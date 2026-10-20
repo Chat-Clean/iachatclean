@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const OpenAI = require('openai');
+const { criarCompletar } = require('./src/infrastructure/openai/completar');
 const axios = require('axios');
 const FormData = require('form-data');
 const crypto = require('crypto');
@@ -70,10 +71,21 @@ const RESPOSTA_VIA_PUSH = (process.env.RESPOSTA_VIA_PUSH || 'false') === 'true';
 const MODELO_RESPOSTA  = process.env.MODELO_RESPOSTA  || 'gpt-4o-mini';
 const MODELO_EXTRACAO  = process.env.MODELO_EXTRACAO  || 'gpt-4o-mini';
 const MODELO_VISAO     = process.env.MODELO_VISAO     || 'gpt-4o';
+// Esforco de raciocinio dos modelos que o suportam (gpt-5, gpt-6-luna): none,
+// low, medium, high, xhigh, max. Modelos que nao suportam nao recebem o
+// parametro. A resposta ao lead e onde o raciocinio paga; extracao e visao sao
+// tarefas mecanicas e, em esforco alto, so comeriam o prazo da resposta.
+const MODELO_ESFORCO_RESPOSTA = process.env.MODELO_ESFORCO_RESPOSTA || '';
+const MODELO_ESFORCO_APOIO    = process.env.MODELO_ESFORCO_APOIO    || 'low';
+// Prazo da fase de resposta. Se o esforco alto nao terminar a tempo, a resposta
+// e refeita com esforco "low" nos ultimos RESERVA_RESPOSTA_MS do prazo.
+const PRAZO_RESPOSTA_IA_MS = parseInt(process.env.PRAZO_RESPOSTA_IA_MS || '30000', 10);
+const RESERVA_RESPOSTA_MS  = 8000;
 // Reinicia o atendimento após N horas sem interação do cliente (padrão: 24h).
 const RESET_INATIVIDADE = parseInt(process.env.RESET_INATIVIDADE_HORAS || '24', 10) * 3600 * 1000;
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const { completar, completarNoPrazo } = criarCompletar({ cliente: openai, aviso: (m) => console.warn('🧠 ' + m) });
 
 const { EMPRESA_INFO, SEGMENTOS, DEPARTAMENTOS } = require('./data');
 const {
@@ -285,10 +297,11 @@ async function extrairInformacoesComIA(mensagem, campoAtual, historicoRecente = 
     try {
         const mensagemSanitizada = mensagem.replace(/[<>]/g, '').substring(0, 1000);
         const prompt = promptExtracao({ mensagemSanitizada, campoAtual });
-        const completion = await openai.chat.completions.create({
+        const completion = await completar({
             model: MODELO_EXTRACAO,
             messages: [...historicoRecente, { role: 'user', content: prompt }],
             temperature: 0,
+            reasoning_effort: MODELO_ESFORCO_APOIO,
             response_format: { type: 'json_object' } // garante JSON válido (o prompt já pede JSON)
         });
         let res = completion.choices[0].message.content.trim();
@@ -338,12 +351,16 @@ async function gerarRespostaIA(leadData, mensagemCliente, proximoCampo, historic
         { role: 'user', content: prompt }
     ];
 
+    // Um prazo so para a fase inteira: a segunda tentativa da guarda usa o que
+    // sobrou dele, em vez de ganhar outro prazo cheio.
+    const ate = Date.now() + PRAZO_RESPOSTA_IA_MS;
     const pedir = async (extra) => {
-        const completion = await openai.chat.completions.create({
+        const completion = await completarNoPrazo({
             model: MODELO_RESPOSTA,
             messages: extra ? [...mensagens, { role: 'user', content: extra }] : mensagens,
-            temperature: 0.7
-        });
+            temperature: 0.7,
+            reasoning_effort: MODELO_ESFORCO_RESPOSTA
+        }, { ate, reservaMs: RESERVA_RESPOSTA_MS });
         return completion.choices[0].message.content.trim();
     };
 
@@ -389,7 +406,7 @@ async function analisarImagem(mediaUrl) {
 - Se for uma tela de sistema/site, diga o que aparenta ser.
 - Se for logo, foto da empresa, produto ou documento, diga o que é.
 Não invente o que não dá pra ver.`;
-        const completion = await openai.chat.completions.create({
+        const completion = await completar({
             model: MODELO_VISAO,
             messages: [{
                 role: 'user',
@@ -398,8 +415,11 @@ Não invente o que não dá pra ver.`;
                     { type: 'image_url', image_url: { url: mediaUrl } }
                 ]
             }],
-            max_tokens: 300,
-            temperature: 0.3
+            // Em modelo de raciocinio o teto inclui os tokens de raciocinio; 300
+            // deixaria a descricao vazia.
+            max_completion_tokens: 1000,
+            temperature: 0.3,
+            reasoning_effort: MODELO_ESFORCO_APOIO
         });
         return completion.choices[0].message.content.trim();
     } catch (e) {
@@ -417,15 +437,16 @@ async function gerarRespostaPosEncaminhamento(leadData, mensagemCliente, histori
     const fallback = respostaPadraoPosEncaminhamento(exp);
     try {
         const prompt = promptPosEncaminhamento({ mensagemCliente, expediente: exp });
-        const completion = await openai.chat.completions.create({
+        const completion = await completarNoPrazo({
             model: MODELO_RESPOSTA,
             messages: [
                 { role: 'system', content: 'Você é o SDR virtual da ChatClean. Escrita natural, curta, registro de WhatsApp.' },
                 ...historicoRecente,
                 { role: 'user', content: prompt }
             ],
-            temperature: 0.6
-        });
+            temperature: 0.6,
+            reasoning_effort: MODELO_ESFORCO_RESPOSTA
+        }, { ate: Date.now() + PRAZO_RESPOSTA_IA_MS, reservaMs: RESERVA_RESPOSTA_MS });
         const resposta = completion.choices[0].message.content.trim();
         if (!resposta) return fallback;
         // Mesmo instruido, o modelo copia "ja vai falar com voce" do historico.
