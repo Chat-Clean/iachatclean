@@ -81,6 +81,11 @@ const MODELO_ESFORCO_APOIO    = process.env.MODELO_ESFORCO_APOIO    || 'low';
 // e refeita com esforco "low" nos ultimos RESERVA_RESPOSTA_MS do prazo.
 const PRAZO_RESPOSTA_IA_MS = parseInt(process.env.PRAZO_RESPOSTA_IA_MS || '30000', 10);
 const RESERVA_RESPOSTA_MS  = 8000;
+// Prazo da extracao. Medido com gpt-6-luna: mediana ~4s, mas casos isolados de
+// 26s e 36s, com qualquer esforco, vindos da API. Sem prazo, um desses estoura
+// o turno. Com 2s de agrupamento + 8s + 30s da resposta, o pior turno fica em ~40s.
+const PRAZO_EXTRACAO_MS   = 8000;
+const RESERVA_EXTRACAO_MS = 3000;
 // Reinicia o atendimento após N horas sem interação do cliente (padrão: 24h).
 const RESET_INATIVIDADE = parseInt(process.env.RESET_INATIVIDADE_HORAS || '24', 10) * 3600 * 1000;
 
@@ -297,13 +302,13 @@ async function extrairInformacoesComIA(mensagem, campoAtual, historicoRecente = 
     try {
         const mensagemSanitizada = mensagem.replace(/[<>]/g, '').substring(0, 1000);
         const prompt = promptExtracao({ mensagemSanitizada, campoAtual });
-        const completion = await completar({
+        const completion = await completarNoPrazo({
             model: MODELO_EXTRACAO,
             messages: [...historicoRecente, { role: 'user', content: prompt }],
             temperature: 0,
             reasoning_effort: MODELO_ESFORCO_APOIO,
             response_format: { type: 'json_object' } // garante JSON válido (o prompt já pede JSON)
-        });
+        }, { ate: Date.now() + PRAZO_EXTRACAO_MS, reservaMs: RESERVA_EXTRACAO_MS, esforcoDeReserva: 'none' });
         let res = completion.choices[0].message.content.trim();
         if (res.includes('```')) res = res.replace(/```json?/g, '').replace(/```/g, '').trim();
         return JSON.parse(res);
