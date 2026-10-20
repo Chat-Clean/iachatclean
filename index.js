@@ -84,7 +84,7 @@ const {
     respostaPadraoPosEncaminhamento,
     mensagemEncaminhamentoSuporte
 } = require('./prompts');
-const { determinarProximoCampo, aplicarCampos, detectarSegmento, escolhaDeSlot, registrarTentativa } = require('./flow');
+const { determinarProximoCampo, aplicarCampos, detectarSegmento, escolhaDeSlot, registrarTentativa, pediuReuniaoAgora, deveOferecerReuniao, ofertaDepoisDaResposta } = require('./flow');
 const { estaEmExpediente } = require('./horario');
 const cal = require('./calendar'); // Google Calendar (inerte se não configurado)
 const pipeline = require('./pipeline'); // Oportunidades no CRM (inerte se não configurado)
@@ -549,35 +549,44 @@ async function tratarAgendamento(chatId, leadData, texto, extraido, exp) {
         // fluxo normal encaminhar ao time (triagem). Se só trouxe uma dúvida,
         // segue aguardando (o fluxo responde a dúvida sem finalizar).
         if (extraido?.recusouReuniao) {
+            leadData.recusouReuniao = true; // interesse sozinho nao reoferece
             leadData.aguardandoEscolhaSlot = false;
             leadData.slotsOferecidos = null;
         }
         return false;
     }
 
-    // 2) Deve oferecer horários? Sempre após a qualificação (dentro OU fora do
-    //    expediente), ou quando o cliente pede explicitamente para agendar.
-    const deveAgendar = leadData.qualificacaoCompleta || extraido?.querAgendar;
-    if (deveAgendar && !leadData.reuniaoAgendada) {
-        let slots = [];
-        try { slots = await cal.horariosLivres({ dias: 5, max: 3 }); }
-        catch (e) { await avisarFalhaDeAgenda(e); return false; }
-        if (!slots.length) return false; // sem horários → fluxo normal (coleta preferência)
-
-        leadData.slotsOferecidos = slots.map(s => ({ start: s.start, end: s.end, calendarId: s.calendarId, label: s.label }));
-        leadData.aguardandoEscolhaSlot = true;
-        const lista = slots.map((s, i) => `${i + 1}) ${s.label}`).join('\n');
-        const intro = exp.aberto
-            ? 'Posso já deixar uma reunião marcada com um especialista. Tenho estes horários:'
-            : `Nosso time retorna ${exp.proximoExpediente}. Posso já deixar uma reunião marcada com um especialista. Tenho estes horários:`;
-        const msg = `${intro}\n${lista}\nQual fica melhor pra você? (é só me dizer o número)`;
-        await enviarMensagem(chatId, msg);
-        leadData.conversationHistory.push({ role: 'user', content: texto });
-        leadData.conversationHistory.push({ role: 'assistant', content: msg });
-        return true;
+    // 2) Deve oferecer horários? Após a qualificação (dentro OU fora do
+    //    expediente), quando o cliente pede para agendar ou quando demonstra
+    //    interesse. Regras em flow.js. Interesse com pergunta junto: quem oferece
+    //    é o fluxo normal, depois de responder a dúvida.
+    if (deveOferecerReuniao(leadData, extraido) && !ofertaDepoisDaResposta(leadData, extraido)) {
+        return oferecerHorarios(chatId, leadData, exp, texto);
     }
 
     return false;
+}
+
+// Envia a grade numerada do Google Calendar. `texto` é a fala do cliente, que
+// entra no histórico junto; null quando ela já entrou (oferta depois da resposta).
+// Retorna false sem enviar nada se a agenda falhar ou não tiver horário.
+async function oferecerHorarios(chatId, leadData, exp, texto) {
+    let slots = [];
+    try { slots = await cal.horariosLivres({ dias: 5, max: 3 }); }
+    catch (e) { await avisarFalhaDeAgenda(e); return false; }
+    if (!slots.length) return false; // sem horários → fluxo normal (coleta preferência)
+
+    leadData.slotsOferecidos = slots.map(s => ({ start: s.start, end: s.end, calendarId: s.calendarId, label: s.label }));
+    leadData.aguardandoEscolhaSlot = true;
+    const lista = slots.map((s, i) => `${i + 1}) ${s.label}`).join('\n');
+    const intro = exp.aberto
+        ? 'Posso já deixar uma reunião marcada com um especialista. Tenho estes horários:'
+        : `Nosso time retorna ${exp.proximoExpediente}. Posso já deixar uma reunião marcada com um especialista. Tenho estes horários:`;
+    const msg = `${intro}\n${lista}\nQual fica melhor pra você? (é só me dizer o número)`;
+    await enviarMensagem(chatId, msg);
+    if (texto !== null) leadData.conversationHistory.push({ role: 'user', content: texto });
+    leadData.conversationHistory.push({ role: 'assistant', content: msg });
+    return true;
 }
 
 // =============================================================
@@ -682,6 +691,19 @@ async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, 
 
         // Lead já encaminhado → só tira dúvidas pontuais, sem refazer o funil
         if (leadData.finalizado) {
+            // Encaminhado mas ainda sem reunião: ele pode pedir a reunião agora ou
+            // estar escolhendo um horário já oferecido. Antes disto a agenda nunca
+            // era consultada aqui e o lead ouvia "o especialista já vai falar com
+            // você e combinar o horário".
+            if (cal.configurado() && !leadData.reuniaoAgendada) {
+                const histExt = leadData.conversationHistory.slice(-4).map(h => ({
+                    role: h.role === 'user' ? 'user' : 'assistant', content: h.content
+                }));
+                const extraidoPos = await extrairInformacoesComIA(texto, null, histExt);
+                if (extraidoPos?.demonstrouInteresse) leadData.demonstrouInteresse = true;
+                if (extraidoPos && (leadData.aguardandoEscolhaSlot || pediuReuniaoAgora(extraidoPos)) &&
+                    await tratarAgendamento(chatId, leadData, texto, extraidoPos, estaEmExpediente())) return;
+            }
             const histPos = leadData.conversationHistory.slice(-30).map(h => ({
                 role: h.role === 'user' ? 'user' : 'assistant', content: h.content
             }));
@@ -805,6 +827,7 @@ async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, 
 
         if (extraido) {
             aplicarCampos(leadData, extraido);
+            if (extraido.demonstrouInteresse) leadData.demonstrouInteresse = true;
             if (extraido.objecao) leadData.objecaoAtiva = extraido.objecao;
             if (extraido.perguntou) leadData.perguntouAgora = true;
             // Ruido na comunicacao: o cliente disse que nao entendeu, que foi mal
@@ -848,8 +871,12 @@ async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, 
                 return;
             }
 
-            // Pediu explicitamente falar com humano → encaminha ao Comercial
+            // Pediu explicitamente falar com humano → encaminha ao Comercial.
+            // "Quero marcar uma reunião com um especialista" também chega aqui (a
+            // extração marca humano E agendar). Com intenção de reunião, oferece a
+            // agenda; só encaminha direto se a agenda não estiver disponível.
             if (extraido.querFalarComHumano && !leadData.finalizado) {
+                if (pediuReuniaoAgora(extraido) && await tratarAgendamento(chatId, leadData, texto, extraido, exp)) return;
                 const hist = leadData.conversationHistory.slice(-8).map(h => ({ role: h.role === 'user' ? 'user' : 'assistant', content: h.content }));
                 if (!usuarioNoHistorico) leadData.conversationHistory.push({ role: 'user', content: texto });
                 await encaminhar(chatId, leadData, DEPARTAMENTOS.comercial, texto, hist, exp);
@@ -871,6 +898,10 @@ async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, 
         const respHist = leadData.conversationHistory.slice(-10).map(h => ({
             role: h.role === 'user' ? 'user' : 'assistant', content: h.content
         }));
+        // Interesse com pergunta junto: a resposta tira a dúvida sem puxar outra
+        // pergunta, e a agenda vai logo depois, no mesmo turno.
+        const ofertaDepois = cal.configurado() && ofertaDepoisDaResposta(leadData, extraido);
+        leadData.ofertaDeReuniaoEmSeguida = ofertaDepois;
         let resposta;
         try {
             resposta = await gerarRespostaIA(leadData, texto, proximoCampoDepois, respHist, exp);
@@ -881,6 +912,7 @@ async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, 
             console.error(`❌ Erro ao gerar resposta IA para ${chatId}:`, e.message);
             await enviarMensagem(chatId, 'Opa, tive uma instabilidade rapidinha por aqui. Pode me mandar de novo o que você disse?');
             if (!usuarioNoHistorico) leadData.conversationHistory.push({ role: 'user', content: texto });
+            leadData.ofertaDeReuniaoEmSeguida = null;
             return;
         }
 
@@ -888,10 +920,12 @@ async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, 
         leadData.perguntouAgora = null;
         leadData.naoEntendeuAgora = null;
         leadData.analiseImagem = null;
+        leadData.ofertaDeReuniaoEmSeguida = null;
 
         await enviarMensagensQuebradas(chatId, resposta);
         if (!usuarioNoHistorico) leadData.conversationHistory.push({ role: 'user', content: texto });
         leadData.conversationHistory.push({ role: 'assistant', content: resposta });
+        if (ofertaDepois) await oferecerHorarios(chatId, leadData, exp, null);
         if (leadData.conversationHistory.length > 100) {
             leadData.conversationHistory = leadData.conversationHistory.slice(-100);
         }
