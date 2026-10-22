@@ -203,6 +203,10 @@ function montarResumo(leadData, chatId, opcoes = {}) {
         `Dor principal: ${leadData.dor || 'Não informado'}\n` +
         `Urgência: ${leadData.urgencia || 'Não informado'}\n` +
         `Decisor: ${leadData.decisor || 'Não informado'}\n` +
+        (leadData.origemAnuncio
+            ? `Origem: anúncio — "${leadData.origemAnuncio.mensagem || 'mensagem não identificada'}"` +
+              (leadData.origemAnuncio.link ? ` (${leadData.origemAnuncio.link})` : '') + '\n'
+            : '') +
         (leadData.reuniaoAgendada ? `📅 Reunião agendada: ${leadData.reuniaoAgendada.label}\n` : '') +
         (leadData.horarioPreferido ? `Horário preferido p/ reunião: ${leadData.horarioPreferido}\n` : '') +
         (opcoes.proximoExpediente ? `Retorno sugerido: ${opcoes.proximoExpediente}\n` : '') +
@@ -226,6 +230,7 @@ async function notificarEquipe(leadData, chatId, opcoes = {}) {
             chatId, nome: leadData.nome || null, empresa: leadData.empresa || null,
             segmento: segNome, objetivo: leadData.objetivo || null, dor: leadData.dor || null,
             urgencia: leadData.urgencia || null, decisor: leadData.decisor || null,
+            origemAnuncio: leadData.origemAnuncio || null,
             departamento, data: new Date().toISOString()
         });
     } catch (e) { console.error('❌ appendLeadFinalizado:', e.message); }
@@ -613,7 +618,7 @@ async function oferecerHorarios(chatId, leadData, exp, texto) {
 // =============================================================
 //  PROCESSAMENTO DE MENSAGEM
 // =============================================================
-async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, mediaUrl, mediaMimetype, quotedText, nomeContato }) {
+async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, mediaUrl, mediaMimetype, quotedText, nomeContato, anuncio }) {
     if (processandoMensagem.get(chatId)) {
         console.log(`⚠️ Já processando mensagem de ${chatId}. Ignorando.`);
         return;
@@ -649,6 +654,8 @@ async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, 
         if (!leadData) leadData = { conversationHistory: [] };
         if (nomeContato && !leadData.nome) leadData.nome = nomeContato;
         if (contactId && !leadData.contactId) leadData.contactId = contactId; // p/ criar oportunidade no CRM ao agendar
+        // Primeiro toque vindo de anúncio: a mensagem pré-pronta identifica a campanha.
+        if (anuncio && !leadData.origemAnuncio) leadData.origemAnuncio = { ...anuncio, em: new Date().toISOString() };
         leadData.ultimaInteracao = Date.now(); // marca esta interação
         leadData.followUpDueAt = null; // nova mensagem cancela reativação pendente
 
@@ -1016,6 +1023,7 @@ function montarUnidade(chatId, b) {
         mediaUrl:      b.midia ? b.midia.mediaUrl      : null,
         mediaMimetype: b.midia ? b.midia.mediaMimetype : null,
         quotedText:    b.quoted,
+        anuncio:       b.anuncio,
         nomeContato:   b.nome,
     };
 }
@@ -1065,7 +1073,7 @@ function agruparEProcessar(parsed) {
         const { chatId } = parsed;
         let b = buffersSync.get(chatId);
         if (!b) {
-            b = { partes: [], ids: [], nome: '', quoted: null, contactId: null, midia: null, timer: null, responder: null };
+            b = { partes: [], ids: [], nome: '', quoted: null, contactId: null, anuncio: null, midia: null, timer: null, responder: null };
             buffersSync.set(chatId, b);
         }
 
@@ -1082,6 +1090,7 @@ function agruparEProcessar(parsed) {
         if (parsed.msgId)                     b.ids.push(parsed.msgId);
         if (!b.nome && parsed.nomeContato)    b.nome = parsed.nomeContato;
         if (!b.quoted && parsed.quotedText)   b.quoted = parsed.quotedText;
+        if (!b.anuncio && parsed.anuncio)     b.anuncio = parsed.anuncio;
         if (!b.contactId && parsed.contactId) b.contactId = parsed.contactId;
         if (parsed.tipo !== 'text') {
             if (b.midia) console.warn('⚠️ Duas mídias na mesma rajada de ' + chatId + ' — processando só a última.');
@@ -1257,6 +1266,9 @@ async function handleApiMensagem(req, res) {
         if (!parsed) return respIgnorado(res, 'payload não reconhecido ou mensagem descartada');
 
         console.log(`📩 ${parsed.chatId} [${parsed.tipo}]: "${parsed.texto || '[mídia]'}"`);
+        if (parsed.anuncio) {
+            console.log(`📣 ${parsed.chatId} veio de anúncio (${parsed.anuncio.link || 'sem link'}) — recorte: ${parsed.anuncio.metodo}.`);
+        }
 
         if (!contatoPermitido(parsed.chatId)) {
             console.log(`🚫 Contato ${parsed.chatId} fora da lista de teste — ignorado`);
