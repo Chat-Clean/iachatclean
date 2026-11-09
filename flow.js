@@ -4,26 +4,21 @@
 //  (test-chat.js) para não haver drift. Sem I/O, sem OpenAI.
 // =============================================================
 
-// Ordem oficial do fluxo. A triagem e CURTA a pedido do negocio: nome, empresa,
-// a dor em uma pergunta aberta, e so o que qualifica comercialmente (urgencia e
-// decisor). O segmento vale mais que o nome da empresa, mas so e PERGUNTADO
-// quando o nome nao o revela: aplicarCampos deduz o ramo de "Pizzaria 3 Irmaos"
-// e determinarProximoCampo pula o campo ja preenchido.
-const CAMPOS = ['nome', 'empresa', 'segmento', 'dor', 'urgencia', 'decisor'];
+// Ordem oficial do fluxo (spec 0003): tres perguntas, nesta ordem. Empresa,
+// quem decide e quando quer comecar. Nome, segmento e dor deixaram de ser
+// perguntados a pedido do negocio; seguem capturados quando o lead fala.
+const CAMPOS = ['empresa', 'decisor', 'urgencia'];
 
 // Nunca PERGUNTADOS, mas capturados quando o cliente fala por conta propria:
-// alimentam o gancho de case e o resumo da equipe.
-const CAMPOS_SO_CAPTURA = ['objetivo', 'cidadeEstado', 'canais', 'volume'];
+// alimentam o gancho de case, a nota da equipe e o nome usado na conversa.
+const CAMPOS_SO_CAPTURA = ['nome', 'segmento', 'dor', 'duvidaPrincipal', 'objetivo', 'cidadeEstado', 'canais', 'volume'];
 
 const CAMPOS_APLICAVEIS = [...CAMPOS, ...CAMPOS_SO_CAPTURA];
 
 const PERGUNTAS = {
-    nome:         'Pergunte o nome dele.',
-    empresa:      'Pergunte o nome da empresa dele.',
-    segmento:     'O nome da empresa não deixou o ramo claro: pergunte em qual ramo/segmento a empresa atua.',
-    dor:         'Faça exatamente esta pergunta, com suas palavras mas sem perder nada: me fala um pouco no que está acontecendo na sua empresa; em poucas palavras, quais são as maiores dores ou demandas que você tem em relação a ferramentas de tecnologia e ferramentas de gestão empresarial.',
-    urgencia:     'Pergunte se ele quer resolver isso agora ou está se planejando para os próximos dias.',
-    decisor:      'Pergunte se ele decide sozinho ou tem mais alguém nesse processo.'
+    empresa:  'Pergunte o nome da empresa dele. Se ele já disse que trabalha por conta própria, isso responde.',
+    decisor:  'Pergunte quem decide isso com ele (se decide sozinho ou com mais alguém).',
+    urgencia: 'Pergunte quando ele quer começar.'
 };
 
 // Quantas vezes o bot insiste num campo antes de desistir dele.
@@ -145,22 +140,6 @@ function detectarSegmento(texto) {
     return null;
 }
 
-// Interpreta qual horário o cliente escolheu de uma lista NUMERADA de reuniões.
-// Usa o que a IA extraiu (slotEscolhido) e, como reforço, lê o texto cru — dígito
-// isolado ("1", "opção 2") ou ordinal por extenso ("o primeiro", "a segunda").
-// Sem esse reforço, dependia só do LLM devolver slotEscolhido e um "1" às vezes
-// escapava. Retorna o número (1..nSlots) ou null.
-function escolhaDeSlot(texto, extraido, nSlots) {
-    const n = Number(extraido?.slotEscolhido);
-    if (Number.isInteger(n) && n >= 1 && n <= nSlots) return n;
-    const t = String(texto || '').toLowerCase();
-    const mDig = t.match(/\b([1-9])\b/);
-    if (mDig) { const d = Number(mDig[1]); if (d >= 1 && d <= nSlots) return d; }
-    const ordinais = [['primeir', 1], ['segund', 2], ['terceir', 3], ['quart', 4], ['quint', 5]];
-    for (const [k, v] of ordinais) if (t.includes(k) && v <= nSlots) return v;
-    return null;
-}
-
 // Intencao de reuniao NESTA mensagem: pedido explicito ou interesse em avancar.
 // A extracao marca "quero marcar com um especialista" como querFalarComHumano E
 // querAgendar; e isto que separa esse caso de "quero falar com uma pessoa".
@@ -172,21 +151,28 @@ function pediuReuniaoAgora(extraido) {
 // qualificacao ou pedido explicito: o lead que dizia "gostei, quero contratar"
 // seguia no questionario. O interesse fica guardado no lead. Recusou a
 // reuniao: so um pedido explicito volta a oferecer.
+// Preco, teste, app ou integracao que so o especialista responde com certeza
+// (spec 0003, CA-010 e CA-011): a resposta e "o especialista mostra na reuniao",
+// e a reuniao e oferecida em seguida.
+function pedeEspecialista(extraido) {
+    return Boolean(extraido && (extraido.duvidaParaEspecialista || extraido.objecao === 'preco'));
+}
+
 function deveOferecerReuniao(leadData, extraido) {
     if (leadData.reuniaoAgendada || leadData.aguardandoEscolhaSlot) return false;
     if (extraido && extraido.querAgendar) return true;
     if (leadData.qualificacaoCompleta) return true;
-    return Boolean(leadData.demonstrouInteresse && !leadData.recusouReuniao);
+    if (leadData.recusouReuniao) return false;
+    return Boolean(leadData.demonstrouInteresse || pedeEspecialista(extraido));
 }
 
-// A oferta vem so do interesse e o lead perguntou algo junto ("tenho interesse,
-// como faco pra contratar?"): a duvida e respondida primeiro e a agenda vai logo
-// depois, no mesmo turno. Com pedido explicito ou qualificacao completa a agenda
-// sai direto, como antes.
+// O lead perguntou algo junto ("tenho interesse, quanto custa?"): a duvida e
+// respondida primeiro e a agenda vai logo depois, no mesmo turno. So o pedido
+// explicito de reuniao recebe a agenda direto, sem resposta antes.
 function ofertaDepoisDaResposta(leadData, extraido) {
     if (!deveOferecerReuniao(leadData, extraido)) return false;
-    if ((extraido && extraido.querAgendar) || leadData.qualificacaoCompleta) return false;
-    return Boolean(extraido && extraido.perguntou);
+    if (extraido && extraido.querAgendar) return false;
+    return Boolean(extraido && (extraido.perguntou || pedeEspecialista(extraido)));
 }
 
 module.exports = {
@@ -202,7 +188,7 @@ module.exports = {
     aplicarCampos,
     detectarSegmento,
     inferirSegmentoDaEmpresa,
-    escolhaDeSlot,
+    pedeEspecialista,
     pediuReuniaoAgora,
     deveOferecerReuniao,
     ofertaDepoisDaResposta

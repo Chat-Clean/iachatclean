@@ -28,7 +28,7 @@ describe('guarda de resposta', () => {
     it('barra afirmacao de agendamento', () => {
         const r = avaliar('Pronto, agendei sua reunião para as 14h!');
         expect(r.ok).toBe(false);
-        expect(r.instrucaoDeCorrecao).toMatch(/número/);
+        expect(r.instrucaoDeCorrecao).toMatch(/horários oferecidos/);
     });
 
     it('corrige a negativa de ler link', () => {

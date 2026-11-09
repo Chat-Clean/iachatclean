@@ -38,9 +38,17 @@ const RESULTADO = (id, gravidade, ok, detalhe = null) => ({ id, gravidade, ok, d
 
 // --- Estilo -------------------------------------------------------------
 
-function noMaximoDuasLinhas(resposta) {
+// Spec 0003: no maximo 3 linhas por mensagem (antes eram 2).
+function noMaximoTresLinhas(resposta) {
     const linhas = linhasNaoVazias(resposta);
-    return RESULTADO('max-2-linhas', 'media', linhas.length <= 2, linhas.length > 2 ? `${linhas.length} linhas` : null);
+    return RESULTADO('max-3-linhas', 'media', linhas.length <= 3, linhas.length > 3 ? `${linhas.length} linhas` : null);
+}
+
+// Spec 0003: uma pergunta por vez. Duas perguntas na mesma mensagem deixam o
+// lead sem saber qual responder.
+function umaPerguntaPorVez(resposta) {
+    const n = (String(resposta).match(/\?/g) || []).length;
+    return RESULTADO('uma-pergunta-por-vez', 'alta', n <= 1, n > 1 ? `${n} perguntas` : null);
 }
 
 function semEmoji(resposta) {
@@ -85,7 +93,7 @@ function semFraseDeDispensa(resposta) {
     return RESULTADO('sem-dispensa', 'alta', !achada, achada || null);
 }
 
-// O prompt manda nunca encerrar o atendimento.
+// O modelo nunca se despede: quem encerra a conversa e o sistema (spec 0003).
 const DESPEDIDAS = ['tchau', 'até mais', 'ate mais', 'até logo', 'ate logo', 'encerro por aqui', 'boa sorte'];
 
 function naoSeDespede(resposta) {
@@ -94,10 +102,9 @@ function naoSeDespede(resposta) {
     return RESULTADO('nao-se-despede', 'alta', !achada, achada || null);
 }
 
-// SINAL, não regra. O prompt diz: "Termine com a próxima pergunta natural do
-// atendimento OU APENAS COM A INFORMAÇÃO/RESPOSTA". Terminar sem pergunta é
-// permitido — o que é proibido é a frase de dispensa, coberta por semFraseDeDispensa.
-// Fica medido porque uma queda brusca aqui indica conversa perdendo condução.
+// SINAL, não regra. A spec 0003 pede que toda mensagem feche com um próximo
+// passo, mas há exceções legítimas (a agenda vai logo depois da resposta, o
+// sistema encerra a conversa). Fica medido no eval, sem regerar.
 function terminaComPergunta(resposta) {
     const linhas = linhasNaoVazias(resposta);
     const ultima = linhas[linhas.length - 1] || '';
@@ -137,7 +144,7 @@ function naoRevelaSerIA(resposta) {
 }
 
 // Nunca passar valor. Pega "R$ 500", "500 reais", "custa 1.200".
-const RE_PRECO = /(r\$\s*\d)|(\d[\d.,]*\s*reais)|(custa\s+\d)|(por\s+\d[\d.,]*\s*(reais|mensais|por mês))/i;
+const RE_PRECO = /(r\$\s*\d)|(a\s+partir\s+de\s+\d)|(\d[\d.,]*\s*reais)|(custa\s+\d)|(por\s+\d[\d.,]*\s*(reais|mensais|por mês))/i;
 
 function naoRevelaPreco(resposta) {
     const m = String(resposta).match(RE_PRECO);
@@ -255,6 +262,33 @@ function naoRepeteNomeSeguidamente(resposta, contexto = {}) {
     return RESULTADO('nao-repete-nome', 'media', !(usouAgora && usouAntes), usouAgora && usouAntes ? nome : null);
 }
 
+// Spec 0003: o nome do perfil do WhatsApp nao e o nome do lead ("Oi chacara",
+// "Oi Deus"). So o nome que ele disse pode ir para a conversa.
+function naoUsaNomeDoPerfil(resposta, contexto = {}) {
+    const perfil = String(contexto.nomeContato || '').trim().split(/\s+/)[0].toLowerCase();
+    const dito = String(contexto.primeiroNome || '').trim().toLowerCase();
+    // Perfil com o nome da empresa que o lead disse: citar a empresa e legitimo.
+    const empresa = String(contexto.empresa || '').toLowerCase();
+    if (perfil.length < 3 || perfil === dito || empresa.includes(perfil)) return RESULTADO('nao-usa-nome-do-perfil', 'alta', true);
+    // So o vocativo conta ("Oi, chacara!", "Perfeito, Deus."): o perfil de uma
+    // empresa ("Pizzaria 3 Irmaos") aparece no texto sem ser usado como nome.
+    const x = perfil.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const saudacao = '(?:oi|olá|ola|opa|e aí|e ai|bom dia|boa tarde|boa noite|obrigad[oa]|perfeito|show|legal|beleza|certo)';
+    const vocativo = new RegExp(`(^\\s*${x}\\s*[,!.?]|^\\s*${saudacao}[,!]?\\s+${x}(?![\\p{L}])|,\\s*${x}\\s*[!?.,]|,\\s*${x}\\s*$)`, 'imu');
+    const usou = vocativo.test(String(resposta));
+    return RESULTADO('nao-usa-nome-do-perfil', 'alta', !usou, usou ? perfil : null);
+}
+
+// Spec 0003: "o time retorna hoje as 9h" depois das 9h e promessa vencida. O
+// modelo copia a frase do historico quando o lead volta ja com o time aberto.
+const RE_RETORNO_HOJE_9H = /hoje\s+(?:às|as|a partir das)\s+0?9\s*h/i;
+
+function naoCitaRetornoVencido(resposta, contexto = {}) {
+    const citou = RE_RETORNO_HOJE_9H.test(String(resposta));
+    const vencido = citou && contexto.proximoExpediente !== 'hoje às 9h';
+    return RESULTADO('nao-cita-retorno-vencido', 'critica', !vencido, vencido ? 'hoje às 9h' : null);
+}
+
 // Perguntar de novo algo que o cliente já respondeu é o que mais faz o lead
 // desistir. Compara a pergunta atual com as anteriores por assunto.
 function naoRepetePergunta(resposta, contexto = {}) {
@@ -298,7 +332,8 @@ function semelhantes(a, b) {
 // --- Execução -----------------------------------------------------------
 
 const ANALISADORES = [
-    noMaximoDuasLinhas,
+    noMaximoTresLinhas,
+    umaPerguntaPorVez,
     semEmoji,
     semMarkdown,
     semFraseDeDispensa,
@@ -313,7 +348,9 @@ const ANALISADORES = [
     naoInventaHorario,
     naoNegaLerLinks,
     naoNegaVerImagens,
+    naoCitaRetornoVencido,
     naoRepeteNomeSeguidamente,
+    naoUsaNomeDoPerfil,
     naoRepetePergunta
 ];
 
@@ -337,7 +374,10 @@ module.exports = {
     contarEmojis,
     extrairPergunta,
     semelhantes,
-    noMaximoDuasLinhas,
+    noMaximoTresLinhas,
+    umaPerguntaPorVez,
+    naoUsaNomeDoPerfil,
+    naoCitaRetornoVencido,
     semEmoji,
     semMarkdown,
     semFraseDeDispensa,
