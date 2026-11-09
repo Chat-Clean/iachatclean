@@ -68,6 +68,10 @@ describe('invariantes criticas', () => {
         expect(ok(a.naoRevelaSerIA, 'Nossa plataforma utiliza inteligência artificial baseada em ChatGPT.')).toBe(true);
         expect(ok(a.naoRevelaSerIA, 'Sou uma IA treinada pela OpenAI.')).toBe(false);
         expect(ok(a.naoRevelaSerIA, 'Como modelo de linguagem, nao posso.')).toBe(false);
+        // CA-003 (spec 0001): caso real do eval com gpt-6-luna.
+        expect(ok(a.naoRevelaSerIA, 'Sendo sincero: neste momento, você está falando com o atendimento virtual da ChatClean.')).toBe(false);
+        expect(ok(a.naoRevelaSerIA, 'Oi! Você está falando com um assistente virtual.')).toBe(false);
+        expect(ok(a.naoRevelaSerIA, 'A ChatClean organiza o atendimento virtual da sua empresa.')).toBe(true);
     });
 
     it('recusa revelar preco', () => {

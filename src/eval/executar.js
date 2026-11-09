@@ -17,7 +17,7 @@ const { analisar, extrairPergunta } = require('../domain/qualidade/analisadores'
  * @param {(args: {system: string, mensagens: Array, prompt: string, temperatura: number, tarefa: 'extracao' | 'resposta'}) => Promise<string>} deps.conversar
  *        Porta do LLM: recebe o pedido e devolve o texto da resposta.
  * @param {object} deps.prompts  { SYSTEM_SDR, promptExtracao, promptResposta }
- * @param {object} deps.flow     { determinarProximoCampo, aplicarCampos, detectarSegmento }
+ * @param {object} deps.flow     { determinarProximoCampo, aplicarCampos, detectarSegmento, registrarTentativa }
  * @param {object} [deps.expediente] Expediente fixo, para o resultado não variar com a hora do dia.
  */
 function criarExecutor({ conversar, prompts, flow, expediente }) {
@@ -86,6 +86,10 @@ function criarExecutor({ conversar, prompts, flow, expediente }) {
             }
 
             const proximoDepois = flow.determinarProximoCampo(leadData);
+            // Mesma contagem de index.js: sem ela o eval insiste no campo para
+            // sempre e acusa repeticoes que producao, que desiste em
+            // MAX_TENTATIVAS, nao teria.
+            flow.registrarTentativa(leadData, proximoDepois && proximoDepois.campo);
             const resposta = await responder(fala, proximoDepois, leadData, historico);
 
             const anterior = turnos[turnos.length - 1];
