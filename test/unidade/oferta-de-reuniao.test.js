@@ -59,9 +59,15 @@ describe('ofertaDepoisDaResposta (CA-003)', () => {
         expect(deveOferecerReuniao({ demonstrouInteresse: true }, { perguntou: false })).toBe(true);
     });
 
-    it('pedido explicito ou qualificacao completa: comportamento de antes, agenda direto', () => {
+    it('pedido explicito: agenda direto, sem resposta antes', () => {
         expect(ofertaDepoisDaResposta({ demonstrouInteresse: true }, { perguntou: true, querAgendar: true })).toBe(false);
-        expect(ofertaDepoisDaResposta({ qualificacaoCompleta: true }, { perguntou: true })).toBe(false);
+    });
+
+    // Spec 0003: com a qualificacao completa, a pergunta do lead e respondida
+    // antes da agenda; antes ela se perdia.
+    it('qualificacao completa com pergunta: responde e oferece em seguida', () => {
+        expect(ofertaDepoisDaResposta({ qualificacaoCompleta: true }, { perguntou: true })).toBe(true);
+        expect(ofertaDepoisDaResposta({ qualificacaoCompleta: true }, { perguntou: false })).toBe(false);
     });
 
     it('sem interesse nao ha oferta nenhuma', () => {
@@ -77,8 +83,8 @@ describe('prompt de resposta com oferta em seguida', () => {
     });
 
     it('avisa o modelo para nao terminar com pergunta quando a agenda vem depois', () => {
-        expect(montar({ ofertaDeReuniaoEmSeguida: true })).toMatch(/o SISTEMA vai oferecer os horários de reunião/);
-        expect(montar({})).not.toMatch(/o SISTEMA vai oferecer os horários de reunião/);
+        expect(montar({ ofertaDeReuniaoEmSeguida: true })).toMatch(/o SISTEMA vai oferecer dois horários de reunião/);
+        expect(montar({})).not.toMatch(/o SISTEMA vai oferecer dois horários de reunião/);
     });
 });
 

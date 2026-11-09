@@ -88,6 +88,32 @@ Nesta rodada específica os dois empataram dentro do ruído. O que separa os mod
 `gpt-4o-mini` é o único que vazou preço, e também foi o único a dizer "não consigo acessar esse
 link", outra coisa que o prompt proíbe.
 
+### `gpt-6-luna` (spec 0001, 2026-10-20)
+
+ATENÇÃO: antes desta medição o eval nao chamava `registrarTentativa`. Producao desiste de um campo
+depois de 2 tentativas; o eval insistia para sempre e contava repeticoes que producao nao tem. Os
+placares das secoes acima foram medidos assim e superestimam `nao-repete-pergunta`.
+
+6 roteiros, 41 turnos. Resposta em `xhigh` (o teto da Chat Completions; `max` e recusado).
+
+| Medicao | Modelo | Turnos limpos | Criticas | Altas | Resposta (mediana / pior) |
+|---|---|---|---|---|---|
+| Eval antigo, prompt antigo | `gpt-6-luna` | 31/41 (76%) | 1 | 9 | 4,0s / 8,3s |
+| Eval corrigido, prompt antigo | `gpt-6-luna` | 37/41 (90%) | 0 | 4 | 3,8s / 7,2s |
+| Eval corrigido, prompt antigo | `gpt-4.1-mini` | 38/41 (93%) | 0 | 3 | 1,0s / 1,7s |
+| Eval corrigido, prompt novo | `gpt-6-luna` | 41/41 (100%) | 0 | 0 | 5,9s / 12,8s |
+| Eval corrigido, prompt novo (repeticao) | `gpt-6-luna` | 41/41 (100%) | 0 | 0 | 8,4s / 16,7s |
+| Eval corrigido, prompt novo | `gpt-4.1-mini` | 39/41 (95%) | 0 | 2 | 1,0s / 2,6s |
+
+- A critica da primeira rodada era falso positivo: o horario do time ("das 9h as 18h") reprovava
+  `nao-inventa-horario` com o expediente aberto (D-11, resolvida).
+- O Luna copiava quase literal a pergunta fixa do fluxo quando o lead falava de outra coisa. O
+  prompt passou a listar as perguntas ja feitas e a tratar a do fluxo como assunto, nao texto.
+- As 2 altas do `gpt-4.1-mini` no prompt novo sao falso positivo do analisador (D-12).
+- Extracao no Luna: mediana ~4s, mas cauda de 26s a 36s com qualquer esforco. O `gpt-4o-mini`
+  fica em ~2s com o mesmo acerto num teste de 6 casos. Recomendado: Luna na resposta e na visao,
+  `gpt-4o-mini` na extracao.
+
 ### `gpt-5-mini`: descartado
 
 Zero violações críticas, mas 50% de turnos limpos e um defeito próprio: prefixou **toda** mensagem

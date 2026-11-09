@@ -30,3 +30,6 @@ specs/
 | Spec | Assunto | Estado |
 |---|---|---|
 | — | Fases 0 e 1 foram executadas direto, com teste de caracterizacao antes de cada extracao | concluidas |
+| [0001](0001-prompt-gpt-6-luna/spec.md) | Prompt e medicao prontos para o gpt-6-luna | concluida |
+| [0002](0002-oferece-reuniao-com-interesse/spec.md) | Oferecer a reuniao quando o lead demonstra interesse | concluida |
+| [0003](0003-regras-do-agente-comercial/spec.md) | Regras do agente comercial (documento ORB) | concluida, menos D-13 |

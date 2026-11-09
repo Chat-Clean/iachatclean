@@ -17,7 +17,7 @@ const { analisar, extrairPergunta } = require('../domain/qualidade/analisadores'
  * @param {(args: {system: string, mensagens: Array, prompt: string, temperatura: number, tarefa: 'extracao' | 'resposta'}) => Promise<string>} deps.conversar
  *        Porta do LLM: recebe o pedido e devolve o texto da resposta.
  * @param {object} deps.prompts  { SYSTEM_SDR, promptExtracao, promptResposta }
- * @param {object} deps.flow     { determinarProximoCampo, aplicarCampos, detectarSegmento }
+ * @param {object} deps.flow     { determinarProximoCampo, aplicarCampos, detectarSegmento, registrarTentativa }
  * @param {object} [deps.expediente] Expediente fixo, para o resultado não variar com a hora do dia.
  */
 function criarExecutor({ conversar, prompts, flow, expediente }) {
@@ -60,7 +60,8 @@ function criarExecutor({ conversar, prompts, flow, expediente }) {
      * Roda um roteiro inteiro e devolve os turnos com as violações de cada um.
      */
     async function rodarRoteiro(roteiro) {
-        const leadData = { conversationHistory: [] };
+        // nomeContato: o nome do perfil do WhatsApp, que a IA nunca pode usar (spec 0003).
+        const leadData = { conversationHistory: [], nomeContato: roteiro.nomeContato || '' };
         const turnos = [];
         const perguntasAnteriores = [];
         let extracoesFalhas = 0;
@@ -76,9 +77,12 @@ function criarExecutor({ conversar, prompts, flow, expediente }) {
 
             leadData.objecaoAtiva = null;
             leadData.perguntouAgora = null;
+            leadData.duvidaParaEspecialistaAgora = null;
             if (extraido) {
                 flow.aplicarCampos(leadData, extraido);
                 leadData.perguntouAgora = extraido.perguntou || null;
+                // Sem agenda no eval: a oferta vira pergunta do proprio modelo, como em producao sem Google Calendar.
+                leadData.duvidaParaEspecialistaAgora = (flow.pedeEspecialista && flow.pedeEspecialista(extraido)) || null;
                 if (extraido.objecao) leadData.objecaoAtiva = extraido.objecao;
                 if (!leadData.segmentoKey) {
                     leadData.segmentoKey = flow.detectarSegmento(leadData.segmento || fala);
@@ -86,12 +90,20 @@ function criarExecutor({ conversar, prompts, flow, expediente }) {
             }
 
             const proximoDepois = flow.determinarProximoCampo(leadData);
+            // Mesma contagem de index.js: sem ela o eval insiste no campo para
+            // sempre e acusa repeticoes que producao, que desiste em
+            // MAX_TENTATIVAS, nao teria.
+            flow.registrarTentativa(leadData, proximoDepois && proximoDepois.campo);
             const resposta = await responder(fala, proximoDepois, leadData, historico);
 
             const anterior = turnos[turnos.length - 1];
             const primeiroNome = (leadData.nome || '').split(' ')[0];
             const contexto = {
                 primeiroNome,
+                nomeContato: leadData.nomeContato,
+                empresa: leadData.empresa || '',
+                expedienteAberto: exp.aberto,
+                proximoExpediente: exp.proximoExpediente,
                 usouNomeNaAnterior: Boolean(
                     anterior && primeiroNome.length > 1 && anterior.resposta.toLowerCase().includes(primeiroNome.toLowerCase())
                 ),

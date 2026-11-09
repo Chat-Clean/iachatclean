@@ -81,8 +81,16 @@ const MODELO_ESFORCO_APOIO    = process.env.MODELO_ESFORCO_APOIO    || 'low';
 // e refeita com esforco "low" nos ultimos RESERVA_RESPOSTA_MS do prazo.
 const PRAZO_RESPOSTA_IA_MS = parseInt(process.env.PRAZO_RESPOSTA_IA_MS || '30000', 10);
 const RESERVA_RESPOSTA_MS  = 8000;
+// Prazo da extracao. Medido com gpt-6-luna: mediana ~4s, mas casos isolados de
+// 26s e 36s, com qualquer esforco, vindos da API. Sem prazo, um desses estoura
+// o turno. Com 2s de agrupamento + 8s + 30s da resposta, o pior turno fica em ~40s.
+const PRAZO_EXTRACAO_MS   = 8000;
+const RESERVA_EXTRACAO_MS = 3000;
 // Reinicia o atendimento após N horas sem interação do cliente (padrão: 24h).
 const RESET_INATIVIDADE = parseInt(process.env.RESET_INATIVIDADE_HORAS || '24', 10) * 3600 * 1000;
+// Quem fala com o lead na reuniao, citado na confirmacao ("Lucas te chama aqui
+// 5 min antes"). Vazio = "Um especialista do time".
+const NOME_ESPECIALISTA = (process.env.NOME_ESPECIALISTA || '').trim();
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const { completar, completarNoPrazo } = criarCompletar({ cliente: openai, aviso: (m) => console.warn('🧠 ' + m) });
@@ -93,10 +101,14 @@ const {
     promptExtracao,
     promptResposta,
     promptPosEncaminhamento,
+    promptRetomada,
     respostaPadraoPosEncaminhamento,
     mensagemEncaminhamentoSuporte
 } = require('./prompts');
-const { determinarProximoCampo, aplicarCampos, detectarSegmento, escolhaDeSlot, registrarTentativa, pediuReuniaoAgora, deveOferecerReuniao, ofertaDepoisDaResposta } = require('./flow');
+const { determinarProximoCampo, aplicarCampos, detectarSegmento, registrarTentativa, pediuReuniaoAgora, deveOferecerReuniao, ofertaDepoisDaResposta, pedeEspecialista } = require('./flow');
+const ofertaDeHorarios = require('./src/domain/agendamento/OfertaDeHorarios');
+const { decidirParada, respostaInstantanea } = require('./src/domain/atendimento/RegrasDeParada');
+const retomadas = require('./src/domain/atendimento/Retomadas');
 const { estaEmExpediente } = require('./horario');
 const cal = require('./calendar'); // Google Calendar (inerte se não configurado)
 const pipeline = require('./pipeline'); // Oportunidades no CRM (inerte se não configurado)
@@ -188,29 +200,11 @@ async function enviarMensagensQuebradas(chatId, textoCompleto) {
 // Notifica a equipe (nota interna no ticket + WhatsApp interno) quando um lead
 // é qualificado, e sinaliza a transferência de departamento no CRM.
 // Monta o resumo estruturado do lead (reusado na nota da equipe e na descrição do evento).
+// Spec 0003: a nota registra so o que o lead disse. Montada em
+// src/domain/atendimento/NotaDoVendedor.js; o legado delega.
+const { montarNota } = require('./src/domain/atendimento/NotaDoVendedor');
 function montarResumo(leadData, chatId, opcoes = {}) {
-    const departamento = opcoes.departamento || DEPARTAMENTOS.comercial;
-    const segNome = leadData.segmentoKey && SEGMENTOS[leadData.segmentoKey]
-        ? SEGMENTOS[leadData.segmentoKey].nome : (leadData.segmento || 'Não informado');
-    return `🎯 LEAD QUALIFICADO — SDR ChatClean${opcoes.tagExtra ? ' [' + opcoes.tagExtra + ']' : ''}\n\n` +
-        `Contato: ${leadData.nome || 'Lead'} (${chatId})\n` +
-        `Empresa: ${leadData.empresa || 'Não informado'}\n` +
-        `Segmento: ${segNome}\n` +
-        `Cidade/UF: ${leadData.cidadeEstado || 'Não informado'}\n` +
-        `Objetivo: ${leadData.objetivo || 'Não informado'}\n` +
-        `Canais hoje: ${leadData.canais || 'Não informado'}\n` +
-        `Volume: ${leadData.volume || 'Não informado'}\n` +
-        `Dor principal: ${leadData.dor || 'Não informado'}\n` +
-        `Urgência: ${leadData.urgencia || 'Não informado'}\n` +
-        `Decisor: ${leadData.decisor || 'Não informado'}\n` +
-        (leadData.origemAnuncio
-            ? `Origem: anúncio — "${leadData.origemAnuncio.mensagem || 'mensagem não identificada'}"` +
-              (leadData.origemAnuncio.link ? ` (${leadData.origemAnuncio.link})` : '') + '\n'
-            : '') +
-        (leadData.reuniaoAgendada ? `📅 Reunião agendada: ${leadData.reuniaoAgendada.label}\n` : '') +
-        (leadData.horarioPreferido ? `Horário preferido p/ reunião: ${leadData.horarioPreferido}\n` : '') +
-        (opcoes.proximoExpediente ? `Retorno sugerido: ${opcoes.proximoExpediente}\n` : '') +
-        `\n➡️ Transferir para o departamento ${departamento}`;
+    return montarNota(leadData, chatId, { ...opcoes, departamento: opcoes.departamento || DEPARTAMENTOS.comercial });
 }
 
 async function notificarEquipe(leadData, chatId, opcoes = {}) {
@@ -227,7 +221,7 @@ async function notificarEquipe(leadData, chatId, opcoes = {}) {
     // Histórico append-only de leads qualificados
     try {
         await store.appendLeadFinalizado({
-            chatId, nome: leadData.nome || null, empresa: leadData.empresa || null,
+            chatId, nome: leadData.nome || leadData.nomeContato || null, empresa: leadData.empresa || null,
             segmento: segNome, objetivo: leadData.objetivo || null, dor: leadData.dor || null,
             urgencia: leadData.urgencia || null, decisor: leadData.decisor || null,
             origemAnuncio: leadData.origemAnuncio || null,
@@ -246,35 +240,66 @@ async function notificarEquipe(leadData, chatId, opcoes = {}) {
 //  FOLLOW-UP DE REATIVAÇÃO (durável — sobrevive a redeploy)
 //  Guarda leadData.followUpDueAt e um varredor dispara os vencidos.
 // =============================================================
-const TEMPO_INATIVIDADE = 30 * 60 * 1000; // 30 min sem resposta → reativação
-const FOLLOWUP_SWEEP    = 2 * 60 * 1000;  // varre a cada 2 min
+// Spec 0003: ate 3 retomadas (30 min, 1 dia, 3 dias depois da ultima fala do
+// lead), nunca entre 21h e 8h. A terceira deixa a porta aberta e encerra.
+// Prazos e janela de silencio em src/domain/atendimento/Retomadas.js.
+const FOLLOWUP_SWEEP = 2 * 60 * 1000;  // varre a cada 2 min
 
 function agendarFollowUpReativacao(leadData) {
-    if (leadData.finalizado) { leadData.followUpDueAt = null; return; }
-    leadData.followUpDueAt = Date.now() + TEMPO_INATIVIDADE;
+    if (leadData.finalizado || leadData.encerrado) { leadData.followUpDueAt = null; return; }
+    leadData.followUpDueAt = retomadas.proximaRetomadaEm(leadData);
 }
 
-function montarMsgReativacao(leadData) {
-    const proximo = determinarProximoCampo(leadData);
-    if (!proximo) return null;
-    const nome = leadData.nome?.split(' ')[0] || '';
-    const oi = nome ? `Oi ${nome}` : 'Oi';
-    if (proximo.campo === 'objetivo' || proximo.campo === 'nome') return 'Oi! Ainda por aí? Se quiser, me conta como podemos te ajudar com seu atendimento 😊';
-    if (proximo.campo === 'dor')   return `${oi}, fiquei aqui pensando no seu atendimento. Qual é hoje o maior desafio pra você?`;
-    return `${oi}, ainda por aí? Se quiser, seguimos de onde paramos que eu já organizo tudo pro time 😊`;
+// A retomada e escrita pela IA, ligada ao que o lead contou, e passa pela
+// mesma guarda da resposta. Falha ou violacao cai no texto pronto.
+async function gerarRetomada(leadData, n) {
+    const proximo = determinarProximoCampo({ ...leadData });
+    const final = retomadas.ehUltimaRetomada(n);
+    const padrao = retomadas.retomadaPadrao(n, proximo && proximo.campo);
+    if (final) return padrao;
+    try {
+        const completion = await completarNoPrazo({
+            model: MODELO_RESPOSTA,
+            messages: [
+                { role: 'system', content: SYSTEM_SDR },
+                ...leadData.conversationHistory.slice(-6).map(h => ({ role: h.role === 'user' ? 'user' : 'assistant', content: h.content })),
+                { role: 'user', content: promptRetomada({ leadData, numero: n + 1, final, campoPendente: proximo && proximo.pergunta }) }
+            ],
+            temperature: 0.7,
+            reasoning_effort: MODELO_ESFORCO_RESPOSTA
+        }, { ate: Date.now() + PRAZO_RESPOSTA_IA_MS, reservaMs: RESERVA_RESPOSTA_MS });
+        const texto = (completion.choices[0].message.content || '').trim();
+        if (!texto || !guarda.avaliar(texto, contextoDeQualidade(leadData, estaEmExpediente())).ok) return padrao;
+        return texto;
+    } catch (e) {
+        console.error('❌ Erro ao gerar retomada:', e.message);
+        return padrao;
+    }
 }
 
 async function dispararFollowUpReativacao(chatId, leadData) {
-    const msg = montarMsgReativacao(leadData);
+    const n = leadData.retomadasEnviadas || 0;
     leadData.followUpDueAt = null;
-    if (!msg || leadData.followUpUltimo === msg) {
+    if (n >= retomadas.MAX_RETOMADAS) {
         try { await store.saveLead(chatId, leadData); } catch (_) {}
         return;
     }
-    leadData.followUpUltimo = msg;
+    const msg = await gerarRetomada(leadData, n);
+    leadData.retomadasEnviadas = n + 1;
+    leadData.conversationHistory.push({ role: 'assistant', content: msg });
+    // A retomada conta como interacao: o lead que responde no dia seguinte
+    // segue de onde parou, em vez de cair no reset por inatividade.
+    leadData.ultimaInteracao = Date.now();
+    if (retomadas.ehUltimaRetomada(n)) {
+        leadData.encerrado = true;
+        leadData.fechoEnviado = true;
+        leadData.motivoEncerramento = 'sem-resposta';
+    } else {
+        agendarFollowUpReativacao(leadData);
+    }
     try { await store.saveLead(chatId, leadData); } catch (_) {}
     await enviarMensagem(chatId, msg);
-    console.log(`📩 Follow-up de reativação enviado para ${chatId}`);
+    console.log(`📩 Retomada ${n + 1}/${retomadas.MAX_RETOMADAS} enviada para ${chatId}`);
 }
 
 async function varrerFollowUps() {
@@ -285,7 +310,7 @@ async function varrerFollowUps() {
             if (processandoMensagem.has(chatId)) continue;
             let leadData;
             try { leadData = await store.getLead(chatId); } catch (_) { continue; }
-            if (!leadData || leadData.finalizado) continue;
+            if (!leadData || leadData.finalizado || leadData.encerrado) continue;
             if (!leadData.followUpDueAt || leadData.followUpDueAt > agora) continue;
             await dispararFollowUpReativacao(chatId, leadData);
         }
@@ -302,13 +327,13 @@ async function extrairInformacoesComIA(mensagem, campoAtual, historicoRecente = 
     try {
         const mensagemSanitizada = mensagem.replace(/[<>]/g, '').substring(0, 1000);
         const prompt = promptExtracao({ mensagemSanitizada, campoAtual });
-        const completion = await completar({
+        const completion = await completarNoPrazo({
             model: MODELO_EXTRACAO,
             messages: [...historicoRecente, { role: 'user', content: prompt }],
             temperature: 0,
             reasoning_effort: MODELO_ESFORCO_APOIO,
             response_format: { type: 'json_object' } // garante JSON válido (o prompt já pede JSON)
-        });
+        }, { ate: Date.now() + PRAZO_EXTRACAO_MS, reservaMs: RESERVA_EXTRACAO_MS, esforcoDeReserva: 'none' });
         let res = completion.choices[0].message.content.trim();
         if (res.includes('```')) res = res.replace(/```json?/g, '').replace(/```/g, '').trim();
         return JSON.parse(res);
@@ -329,7 +354,10 @@ function contextoDeQualidade(leadData, exp = null) {
     const ultima = respostasAnteriores[respostasAnteriores.length - 1];
     return {
         primeiroNome,
-        // Citar hora so e legitimo depois de o SISTEMA oferecer a grade numerada.
+        // Spec 0003: o nome do perfil do WhatsApp nunca vai para a conversa.
+        nomeContato: leadData.nomeContato || '',
+        empresa: leadData.empresa || '',
+        // Citar hora so e legitimo depois de o SISTEMA oferecer os horarios.
         sistemaOfereceuHorarios: Boolean(
             leadData.aguardandoEscolhaSlot && (leadData.slotsOferecidos || []).length
         ),
@@ -524,68 +552,38 @@ async function avisarFalhaDeAgenda(erro) {
 async function tratarAgendamento(chatId, leadData, texto, extraido, exp) {
     if (!cal.configurado()) return false;
 
-    // 1) Cliente escolhendo um horário já oferecido → cria o evento
+    // 1) Cliente respondendo a uma oferta de horarios. Spec 0003: aceita "1",
+    //    "10h", "as 10", "de manha", "pode ser"; resposta ambigua fica com o
+    //    horario mais proximo; hora fora da oferta e procurada na grade livre.
     if (leadData.aguardandoEscolhaSlot) {
         const slots = leadData.slotsOferecidos || [];
-        const escolha = escolhaDeSlot(texto, extraido, slots.length);
-        if (escolha && slots[escolha - 1]) {
-            const s = slots[escolha - 1];
-            try {
-                const ev = await cal.agendarReuniao({
-                    start: s.start, end: s.end, calendarId: s.calendarId,
-                    titulo: `Reunião ChatClean — ${leadData.nome || 'Lead'}${leadData.empresa ? ' (' + leadData.empresa + ')' : ''}`,
-                    descricao: montarResumo(leadData, chatId, { departamento: DEPARTAMENTOS.comercial })
-                });
-                leadData.reuniaoAgendada = { label: ev.label, id: ev.id };
-                leadData.aguardandoEscolhaSlot = false;
-                leadData.slotsOferecidos = null;
-                const msg = `Prontinho! Deixei sua reunião marcada para ${ev.label} com um especialista da ChatClean 😊`;
-                await enviarMensagem(chatId, msg);
-                leadData.conversationHistory.push({ role: 'user', content: texto });
-                leadData.conversationHistory.push({ role: 'assistant', content: msg });
-                // Cria a oportunidade no funil comercial (etapa "REUNIÃO MARCADA").
-                // Best-effort: falha aqui NÃO impacta o agendamento nem o atendimento.
-                if (pipeline.configurado()) {
-                    if (leadData.contactId) {
-                        // Nome do card = nome do lead (+ empresa, quando houver) para
-                        // bater o olho no Kanban. Sem nome → cai no PIPELINE_OPP_NOME.
-                        const nomeCard = leadData.nome
-                            ? `${leadData.nome}${leadData.empresa ? ' — ' + leadData.empresa : ''}`
-                            : undefined;
-                        const opp = await pipeline.criarOportunidade({
-                            contactId: leadData.contactId,
-                            nome: nomeCard,
-                            descricao: `Reunião marcada para ${ev.label}`
-                        });
-                        if (opp) leadData.oportunidadeId = opp.id;
-                    } else {
-                        console.warn(`⚠️ ${chatId}: reunião agendada sem contactId — oportunidade não criada no CRM.`);
-                    }
-                }
-                await notificarEquipe(leadData, chatId, { departamento: DEPARTAMENTOS.comercial, tagExtra: 'REUNIÃO AGENDADA' });
-                leadData.finalizado = true;
-                return true;
-            } catch (e) {
-                console.error('❌ Erro ao agendar reunião:', e.message);
-                leadData.aguardandoEscolhaSlot = false; // deixa o fluxo normal seguir
-                return false;
-            }
+        const escolha = ofertaDeHorarios.interpretarEscolha(texto, slots, extraido || {});
+        let slot = escolha && escolha.indice !== undefined ? slots[escolha.indice] : null;
+        if (escolha && escolha.pedido) slot = await horarioLivrePedido(escolha.pedido);
+        if (slot && ofertaDeHorarios.slotVencido(slot)) {
+            // Oferta antiga (o lead respondeu horas depois): nunca agenda horario
+            // que ja passou. Oferece de novo.
+            leadData.aguardandoEscolhaSlot = false;
+            return oferecerHorarios(chatId, leadData, exp, texto, 'Esse horário já passou.');
         }
+        if (slot) return agendarHorario(chatId, leadData, texto, slot);
+
         // Não escolheu um horário. Se RECUSOU a reunião, encerra a espera para o
-        // fluxo normal encaminhar ao time (triagem). Se só trouxe uma dúvida,
-        // segue aguardando (o fluxo responde a dúvida sem finalizar).
+        // fluxo normal seguir. Se só trouxe uma dúvida, segue aguardando (o fluxo
+        // responde a dúvida e repete os dois horários).
         if (extraido?.recusouReuniao) {
             leadData.recusouReuniao = true; // interesse sozinho nao reoferece
             leadData.aguardandoEscolhaSlot = false;
             leadData.slotsOferecidos = null;
+            leadData.ofertaTexto = null;
         }
         return false;
     }
 
     // 2) Deve oferecer horários? Após a qualificação (dentro OU fora do
-    //    expediente), quando o cliente pede para agendar ou quando demonstra
-    //    interesse. Regras em flow.js. Interesse com pergunta junto: quem oferece
-    //    é o fluxo normal, depois de responder a dúvida.
+    //    expediente), quando o cliente pede para agendar, demonstra interesse ou
+    //    pergunta algo que só o especialista responde. Regras em flow.js. Com
+    //    pergunta junto, quem oferece é o fluxo normal, depois de responder.
     if (deveOferecerReuniao(leadData, extraido) && !ofertaDepoisDaResposta(leadData, extraido)) {
         return oferecerHorarios(chatId, leadData, exp, texto);
     }
@@ -593,22 +591,85 @@ async function tratarAgendamento(chatId, leadData, texto, extraido, exp) {
     return false;
 }
 
-// Envia a grade numerada do Google Calendar. `texto` é a fala do cliente, que
-// entra no histórico junto; null quando ela já entrou (oferta depois da resposta).
+// Horario pedido pelo lead que nao estava na oferta ("pode ser as 16h?"):
+// o primeiro horario livre compativel nos proximos dias uteis, ou null.
+async function horarioLivrePedido(pedido) {
+    try {
+        const livres = await cal.horariosLivres({ dias: 5, max: 60 });
+        const compativeis = ofertaDeHorarios.filtrarPorPedido(livres, pedido);
+        return compativeis.length ? livres[compativeis[0]] : null;
+    } catch (e) {
+        await avisarFalhaDeAgenda(e);
+        return null;
+    }
+}
+
+async function agendarHorario(chatId, leadData, texto, s) {
+    try {
+        const nomeLead = leadData.nome || leadData.nomeContato || 'Lead';
+        const ev = await cal.agendarReuniao({
+            start: s.start, end: s.end, calendarId: s.calendarId,
+            titulo: `Reunião ChatClean — ${nomeLead}${leadData.empresa ? ' (' + leadData.empresa + ')' : ''}`,
+            descricao: montarResumo(leadData, chatId, { departamento: DEPARTAMENTOS.comercial })
+        });
+        leadData.reuniaoAgendada = { label: ev.label, id: ev.id };
+        leadData.aguardandoEscolhaSlot = false;
+        leadData.slotsOferecidos = null;
+        leadData.ofertaTexto = null;
+        // Spec 0003: dia da semana, data e hora, e o assunto acaba aqui. A
+        // confirmacao conta como fecho: agradecimento depois dela fica sem resposta.
+        const msg = ofertaDeHorarios.textoDaConfirmacao(s, NOME_ESPECIALISTA);
+        leadData.fechoEnviado = true;
+        await enviarMensagem(chatId, msg);
+        leadData.conversationHistory.push({ role: 'user', content: texto });
+        leadData.conversationHistory.push({ role: 'assistant', content: msg });
+        // Cria a oportunidade no funil comercial (etapa "REUNIÃO MARCADA").
+        // Best-effort: falha aqui NÃO impacta o agendamento nem o atendimento.
+        if (pipeline.configurado()) {
+            if (leadData.contactId) {
+                // Nome do card = nome do lead (+ empresa) para bater o olho no
+                // Kanban. Sem nome dito, o do perfil do WhatsApp: o card é
+                // interno, nunca vai para o lead.
+                const base = leadData.nome || leadData.nomeContato;
+                const nomeCard = base ? `${base}${leadData.empresa ? ' — ' + leadData.empresa : ''}` : undefined;
+                const opp = await pipeline.criarOportunidade({
+                    contactId: leadData.contactId,
+                    nome: nomeCard,
+                    descricao: `Reunião marcada para ${ev.label}`
+                });
+                if (opp) leadData.oportunidadeId = opp.id;
+            } else {
+                console.warn(`⚠️ ${chatId}: reunião agendada sem contactId — oportunidade não criada no CRM.`);
+            }
+        }
+        await notificarEquipe(leadData, chatId, { departamento: DEPARTAMENTOS.comercial, tagExtra: 'REUNIÃO AGENDADA' });
+        leadData.finalizado = true;
+        return true;
+    } catch (e) {
+        console.error('❌ Erro ao agendar reunião:', e.message);
+        leadData.aguardandoEscolhaSlot = false; // deixa o fluxo normal seguir
+        return false;
+    }
+}
+
+// Oferece DOIS horarios do Google Calendar em texto corrido (spec 0003):
+// "Amanha as 10h ou as 14h?". `texto` é a fala do cliente, que entra no
+// histórico junto; null quando ela já entrou (oferta depois da resposta).
 // Retorna false sem enviar nada se a agenda falhar ou não tiver horário.
-async function oferecerHorarios(chatId, leadData, exp, texto) {
-    let slots = [];
-    try { slots = await cal.horariosLivres({ dias: 5, max: 3 }); }
+async function oferecerHorarios(chatId, leadData, exp, texto, prefixo = '') {
+    let livres = [];
+    try { livres = await cal.horariosLivres({ dias: 5, max: 20 }); }
     catch (e) { await avisarFalhaDeAgenda(e); return false; }
+    const slots = ofertaDeHorarios.escolherDoisHorarios(livres.filter(s => !ofertaDeHorarios.slotVencido(s)));
     if (!slots.length) return false; // sem horários → fluxo normal (coleta preferência)
 
     leadData.slotsOferecidos = slots.map(s => ({ start: s.start, end: s.end, calendarId: s.calendarId, label: s.label }));
     leadData.aguardandoEscolhaSlot = true;
-    const lista = slots.map((s, i) => `${i + 1}) ${s.label}`).join('\n');
+    leadData.ofertaTexto = ofertaDeHorarios.textoDaOferta(slots);
     const intro = exp.aberto
-        ? 'Posso já deixar uma reunião marcada com um especialista. Tenho estes horários:'
-        : `Nosso time retorna ${exp.proximoExpediente}. Posso já deixar uma reunião marcada com um especialista. Tenho estes horários:`;
-    const msg = `${intro}\n${lista}\nQual fica melhor pra você? (é só me dizer o número)`;
+        ? 'Consigo uma conversa rápida com um especialista.'
+        : `Nosso time retorna ${exp.proximoExpediente}, e já consigo deixar uma conversa marcada com um especialista.`;
+    const msg = [prefixo, intro, leadData.ofertaTexto].filter(Boolean).join(' ');
     await enviarMensagem(chatId, msg);
     if (texto !== null) leadData.conversationHistory.push({ role: 'user', content: texto });
     leadData.conversationHistory.push({ role: 'assistant', content: msg });
@@ -618,7 +679,40 @@ async function oferecerHorarios(chatId, leadData, exp, texto) {
 // =============================================================
 //  PROCESSAMENTO DE MENSAGEM
 // =============================================================
-async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, mediaUrl, mediaMimetype, quotedText, nomeContato, anuncio }) {
+// Sinais da mensagem para as regras de parada (spec 0003, secao 07). Depois do
+// encaminhamento nada mais esta pendente, entao agradecimento vale despedida.
+function sinaisDeParada(extraido, instantanea, posEncaminhamento) {
+    const e = extraido || {};
+    return {
+        despedida: Boolean(e.despedida || (posEncaminhamento && e.soAgradecimento)),
+        soAgradecimento: Boolean(e.soAgradecimento),
+        semInteresse: Boolean(e.semInteresse),
+        foraDoPerfil: Boolean(e.foraDoPerfil),
+        pareceRobo: Boolean(e.pareceRobo),
+        respostaInstantanea: instantanea
+    };
+}
+
+// Executa a decisao das regras de parada. Retorna true se o turno acabou.
+async function aplicarParada(chatId, leadData, texto, parada, usuarioNoHistorico = false) {
+    if (parada.acao === 'perguntarMotivo') { leadData.perguntarMotivoAgora = true; return false; }
+    if (parada.acao !== 'silencio' && parada.acao !== 'fecho') return false;
+    if (!usuarioNoHistorico) leadData.conversationHistory.push({ role: 'user', content: texto });
+    leadData.followUpDueAt = null;
+    if (parada.acao === 'silencio') {
+        console.log(`🤫 ${chatId}: conversa encerrada — mensagem sem resposta.`);
+        return true;
+    }
+    await enviarMensagem(chatId, parada.texto);
+    leadData.conversationHistory.push({ role: 'assistant', content: parada.texto });
+    console.log(`🔚 ${chatId}: conversa encerrada (${parada.motivo}).`);
+    if (parada.motivo === 'robo' && EQUIPE_NUMERO) {
+        try { await ccPush(EQUIPE_NUMERO, { body: `⚠️ O contato ${chatId} parece ser outro robô (resposta automática). A IA respondeu uma vez e parou. Verificar manualmente.` }); } catch (_) {}
+    }
+    return true;
+}
+
+async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, mediaUrl, mediaMimetype, quotedText, nomeContato, anuncio, recebidaEm }) {
     if (processandoMensagem.get(chatId)) {
         console.log(`⚠️ Já processando mensagem de ${chatId}. Ignorando.`);
         return;
@@ -652,12 +746,19 @@ async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, 
             leadData = null;
         }
         if (!leadData) leadData = { conversationHistory: [] };
-        if (nomeContato && !leadData.nome) leadData.nome = nomeContato;
+        // Spec 0003: o nome do perfil do WhatsApp ("chacara", "Deus") nao e o
+        // nome do lead. Fica em nomeContato, so para o CRM e a nota da equipe.
+        if (nomeContato) leadData.nomeContato = nomeContato;
+        if (leadData.nome && leadData.nome === leadData.nomeContato && !leadData.nomeDito) leadData.nome = null; // lead salvo antes da spec 0003
         if (contactId && !leadData.contactId) leadData.contactId = contactId; // p/ criar oportunidade no CRM ao agendar
         // Primeiro toque vindo de anúncio: a mensagem pré-pronta identifica a campanha.
         if (anuncio && !leadData.origemAnuncio) leadData.origemAnuncio = { ...anuncio, em: new Date().toISOString() };
         leadData.ultimaInteracao = Date.now(); // marca esta interação
         leadData.followUpDueAt = null; // nova mensagem cancela reativação pendente
+        // Resposta em segundos depois da nossa: sinal de robo do outro lado.
+        const instantanea = respostaInstantanea(leadData, recebidaEm);
+        leadData.ultimaFalaDoLeadEm = Date.now();
+        leadData.retomadasEnviadas = 0; // o lead voltou: a cadencia recomeca
 
         // Mídia (imagem/vídeo/documento) já registra o turno do cliente no
         // histórico com uma descrição rica; quando isso acontece, marcamos aqui
@@ -717,17 +818,25 @@ async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, 
             }
         }
 
+        // Robo do outro lado ja identificado: silencio, sem gastar extracao.
+        if (leadData.roboDetectado) return;
+
         // Lead já encaminhado → só tira dúvidas pontuais, sem refazer o funil
         if (leadData.finalizado) {
+            const histExt = leadData.conversationHistory.slice(-4).map(h => ({
+                role: h.role === 'user' ? 'user' : 'assistant', content: h.content
+            }));
+            const extraidoPos = await extrairInformacoesComIA(texto, null, histExt);
+            // Spec 0003: despedida depois da confirmacao ou do encaminhamento nao
+            // vira outra despedida; robo para em no maximo 3 trocas.
+            const paradaPos = decidirParada(leadData, sinaisDeParada(extraidoPos, instantanea, true));
+            leadData.perguntarMotivoAgora = null; // encaminhado: a resposta pos-encaminhamento cuida
+            if (await aplicarParada(chatId, leadData, texto, paradaPos)) return;
             // Encaminhado mas ainda sem reunião: ele pode pedir a reunião agora ou
             // estar escolhendo um horário já oferecido. Antes disto a agenda nunca
             // era consultada aqui e o lead ouvia "o especialista já vai falar com
             // você e combinar o horário".
             if (cal.configurado() && !leadData.reuniaoAgendada) {
-                const histExt = leadData.conversationHistory.slice(-4).map(h => ({
-                    role: h.role === 'user' ? 'user' : 'assistant', content: h.content
-                }));
-                const extraidoPos = await extrairInformacoesComIA(texto, null, histExt);
                 if (extraidoPos?.demonstrouInteresse) leadData.demonstrouInteresse = true;
                 if (extraidoPos && (leadData.aguardandoEscolhaSlot || pediuReuniaoAgora(extraidoPos)) &&
                     await tratarAgendamento(chatId, leadData, texto, extraidoPos, estaEmExpediente())) return;
@@ -848,13 +957,22 @@ async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, 
         }));
         const extraido = await extrairInformacoesComIA(texto, proximoCampoAntes?.campo, historicoRecente.slice(-4));
 
+        // Regras de parada (spec 0003): despedida, sem interesse, fora do perfil
+        // e robo do outro lado. Vem antes de tudo: nada disso recebe reuniao.
+        leadData.perguntarMotivoAgora = null;
+        const parada = decidirParada(leadData, sinaisDeParada(extraido, instantanea, false));
+        if (await aplicarParada(chatId, leadData, texto, parada, usuarioNoHistorico)) return;
+
         // Sinais transitórios (valem só para esta resposta)
         leadData.objecaoAtiva = null;
         leadData.perguntouAgora = null;
         leadData.naoEntendeuAgora = null;
+        leadData.duvidaParaEspecialistaAgora = null;
 
         if (extraido) {
             aplicarCampos(leadData, extraido);
+            if (extraido.nome) leadData.nomeDito = true;
+            leadData.duvidaParaEspecialistaAgora = pedeEspecialista(extraido) || null;
             if (extraido.demonstrouInteresse) leadData.demonstrouInteresse = true;
             if (extraido.objecao) leadData.objecaoAtiva = extraido.objecao;
             if (extraido.perguntou) leadData.perguntouAgora = true;
@@ -921,14 +1039,15 @@ async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, 
 
         // Sub-fluxo de agendamento (Google Calendar). Inerte se não configurado;
         // se tratou o turno (ofereceu horários ou agendou), encerra aqui.
-        if (await tratarAgendamento(chatId, leadData, texto, extraido, exp)) return;
+        // Lead que acabou de dizer "nao": primeiro entender o motivo, sem reuniao.
+        if (!leadData.perguntarMotivoAgora && await tratarAgendamento(chatId, leadData, texto, extraido, exp)) return;
 
         const respHist = leadData.conversationHistory.slice(-10).map(h => ({
             role: h.role === 'user' ? 'user' : 'assistant', content: h.content
         }));
         // Interesse com pergunta junto: a resposta tira a dúvida sem puxar outra
         // pergunta, e a agenda vai logo depois, no mesmo turno.
-        const ofertaDepois = cal.configurado() && ofertaDepoisDaResposta(leadData, extraido);
+        const ofertaDepois = cal.configurado() && !leadData.perguntarMotivoAgora && ofertaDepoisDaResposta(leadData, extraido);
         leadData.ofertaDeReuniaoEmSeguida = ofertaDepois;
         let resposta;
         try {
@@ -941,6 +1060,8 @@ async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, 
             await enviarMensagem(chatId, 'Opa, tive uma instabilidade rapidinha por aqui. Pode me mandar de novo o que você disse?');
             if (!usuarioNoHistorico) leadData.conversationHistory.push({ role: 'user', content: texto });
             leadData.ofertaDeReuniaoEmSeguida = null;
+            leadData.perguntarMotivoAgora = null;
+            leadData.duvidaParaEspecialistaAgora = null;
             return;
         }
 
@@ -949,6 +1070,8 @@ async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, 
         leadData.naoEntendeuAgora = null;
         leadData.analiseImagem = null;
         leadData.ofertaDeReuniaoEmSeguida = null;
+        leadData.perguntarMotivoAgora = null;
+        leadData.duvidaParaEspecialistaAgora = null;
 
         await enviarMensagensQuebradas(chatId, resposta);
         if (!usuarioNoHistorico) leadData.conversationHistory.push({ role: 'user', content: texto });
@@ -979,6 +1102,9 @@ async function processarMensagem({ chatId, contactId, texto, tipo, mediaBase64, 
         clearTimeout(timeoutId);
         processandoMensagem.delete(chatId);
         if (leadData) {
+            // Quando a IA respondeu: base do sinal de resposta instantanea (robo).
+            const cap = capturaCtx.getStore();
+            if (cap && (cap.mensagens.length || cap.enviadasPorPush)) leadData.ultimaRespostaEm = Date.now();
             try { await store.saveLead(chatId, leadData); }
             catch (e) { console.error('❌ Erro ao salvar estado da conversa:', e.message); }
         }
@@ -1025,6 +1151,7 @@ function montarUnidade(chatId, b) {
         quotedText:    b.quoted,
         anuncio:       b.anuncio,
         nomeContato:   b.nome,
+        recebidaEm:    b.chegouEm,
     };
 }
 
@@ -1073,7 +1200,7 @@ function agruparEProcessar(parsed) {
         const { chatId } = parsed;
         let b = buffersSync.get(chatId);
         if (!b) {
-            b = { partes: [], ids: [], nome: '', quoted: null, contactId: null, anuncio: null, midia: null, timer: null, responder: null };
+            b = { partes: [], ids: [], nome: '', quoted: null, contactId: null, anuncio: null, midia: null, timer: null, responder: null, chegouEm: Date.now() };
             buffersSync.set(chatId, b);
         }
 
