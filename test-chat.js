@@ -82,7 +82,7 @@ async function turno(texto) {
 function mostrarEstado() {
     const seg = leadData.segmentoKey && SEGMENTOS[leadData.segmentoKey] ? SEGMENTOS[leadData.segmentoKey].nome : leadData.segmento;
     console.log('\n  📋 Estado do lead:');
-    for (const k of ['objetivo', 'nome', 'empresa', 'cidadeEstado', 'canais', 'volume', 'dor', 'urgencia', 'decisor']) {
+    for (const k of ['nome', 'empresa', 'decisor', 'urgencia', 'duvidaPrincipal', 'dor', 'objetivo', 'cidadeEstado', 'canais', 'volume']) {
         if (leadData[k]) console.log(`     ${k}: ${leadData[k]}`);
     }
     if (seg) console.log(`     segmento: ${seg}`);

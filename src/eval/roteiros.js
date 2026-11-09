@@ -80,6 +80,17 @@ const ROTEIROS = [
         ]
     },
     {
+        id: 'autonomo-perfil-estranho',
+        descricao: 'Spec 0003: perfil do WhatsApp nao e nome; autonomo ja respondeu empresa e quem decide.',
+        nomeContato: 'Chácara',
+        falas: [
+            'boa tarde, vi o anuncio de voces',
+            'sou instrutor de transito autonomo',
+            'vocês têm teste grátis?',
+            'quero começar mês que vem'
+        ]
+    },
+    {
         id: 'humano-confuso',
         descricao: 'Lead sinalizando que nao entendeu ou que foi mal interpretado.',
         falas: [

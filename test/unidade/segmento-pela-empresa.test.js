@@ -30,30 +30,24 @@ describe('segmento deduzido do nome da empresa', () => {
         expect(inferirSegmentoDaEmpresa(null)).toBe(null);
     });
 
-    // O segmento vale mais que o nome da empresa, mas so e PERGUNTADO quando o
-    // nome nao o revela.
-    it('pede a empresa antes de pensar no segmento', () => {
-        expect(determinarProximoCampo({ nome: 'Joao' }).campo).toBe('empresa');
+    // Spec 0003: o segmento deixou de ser perguntado. A deducao segue valendo
+    // para o gancho de case.
+    it('pede a empresa primeiro', () => {
+        expect(determinarProximoCampo({}).campo).toBe('empresa');
     });
 
-    it('nome que entrega o ramo pula a pergunta do segmento', () => {
-        const lead = { nome: 'Joao' };
+    it('nome que entrega o ramo preenche o segmento', () => {
+        const lead = {};
         aplicarCampos(lead, { empresa: 'Pizzaria 3 Irmãos' });
         expect(lead.segmento).toBe('alimentação');
-        expect(determinarProximoCampo(lead).campo).toBe('dor');
+        expect(determinarProximoCampo(lead).campo).toBe('decisor');
     });
 
-    it('o extrator entregando o segmento junto com a empresa tambem pula a pergunta', () => {
-        const lead = { nome: 'Joao' };
-        aplicarCampos(lead, { empresa: 'Studio Bella', segmento: 'salão de beleza' });
-        expect(determinarProximoCampo(lead).campo).toBe('dor');
-    });
-
-    it('nome sem pista nao deduz, e ai o segmento e perguntado', () => {
-        const lead = { nome: 'Joao' };
+    it('nome sem pista nao deduz, e o segmento nao e perguntado', () => {
+        const lead = {};
         aplicarCampos(lead, { empresa: 'Silva & Filhos' });
         expect(lead.segmento).toBeUndefined();
-        expect(determinarProximoCampo(lead).campo).toBe('segmento');
+        expect(determinarProximoCampo(lead).campo).toBe('decisor');
     });
 
     it('nao sobrescreve o segmento que o cliente informou', () => {
