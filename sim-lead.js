@@ -10,8 +10,9 @@
 require('dotenv').config();
 const OpenAI = require('openai');
 const { SYSTEM_SDR, promptExtracao, promptResposta } = require('./prompts');
-const { SEGMENTOS, DEPARTAMENTOS } = require('./data');
-const { determinarProximoCampo, aplicarCampos, detectarSegmento, escolhaDeSlot } = require('./flow');
+const { DEPARTAMENTOS } = require('./data');
+const { determinarProximoCampo, aplicarCampos, detectarSegmento } = require('./flow');
+const ofertaDeHorarios = require('./src/domain/agendamento/OfertaDeHorarios');
 const { estaEmExpediente } = require('./horario');
 const cal = require('./calendar');
 
@@ -69,23 +70,17 @@ async function responder(mensagem, proximoCampo, hist) {
     return c.choices[0].message.content.trim();
 }
 
+// Mesmos campos da nota de producao (spec 0003): so o que o lead disse.
 function resumoEquipe() {
-    const segNome = leadData.segmentoKey && SEGMENTOS[leadData.segmentoKey] ? SEGMENTOS[leadData.segmentoKey].nome : (leadData.segmento || 'Não informado');
     return [
         '🎯 LEAD QUALIFICADO — SDR ChatClean',
         '',
         `Contato: ${leadData.nome || 'Lead'} (${chatId})`,
         `Empresa: ${leadData.empresa || 'Não informado'}`,
-        `Segmento: ${segNome}`,
-        `Cidade/UF: ${leadData.cidadeEstado || 'Não informado'}`,
-        `Objetivo: ${leadData.objetivo || 'Não informado'}`,
-        `Canais hoje: ${leadData.canais || 'Não informado'}`,
-        `Volume: ${leadData.volume || 'Não informado'}`,
-        `Dor principal: ${leadData.dor || 'Não informado'}`,
-        `Urgência: ${leadData.urgencia || 'Não informado'}`,
-        `Decisor: ${leadData.decisor || 'Não informado'}`,
-        leadData.reuniaoAgendada ? `📅 Reunião agendada: ${leadData.reuniaoAgendada.label}` : null,
-        leadData.horarioPreferido ? `Horário preferido p/ reunião: ${leadData.horarioPreferido}` : null,
+        `Quem decide: ${leadData.decisor || 'Não informado'}`,
+        `Quando quer começar: ${leadData.urgencia || 'Não informado'}`,
+        `Dúvida principal: ${leadData.duvidaPrincipal || leadData.dor || 'Não informado'}`,
+        leadData.reuniaoAgendada ? `📅 Horário marcado: ${leadData.reuniaoAgendada.label}` : null,
         (!exp.aberto && !leadData.reuniaoAgendada) ? `Retorno sugerido: ${exp.proximoExpediente}` : null,
         '',
         `➡️ Transferir para o departamento ${DEPARTAMENTOS.comercial}${leadData.reuniaoAgendada ? ' [REUNIÃO AGENDADA]' : (exp.aberto ? '' : ' [FORA DE EXPEDIENTE — AGENDAR RETORNO]')}`
@@ -119,9 +114,9 @@ async function agendarSubfluxo(texto, extraido) {
     if (!cal.configurado()) return null;
     if (leadData.aguardandoEscolhaSlot) {
         const slots = leadData.slotsOferecidos || [];
-        const escolha = escolhaDeSlot(texto, extraido, slots.length);
-        if (escolha && slots[escolha - 1]) {
-            const s = slots[escolha - 1];
+        const escolha = ofertaDeHorarios.interpretarEscolha(texto, slots, extraido || {});
+        if (escolha && escolha.indice !== undefined && slots[escolha.indice]) {
+            const s = slots[escolha.indice];
             const ev = await cal.agendarReuniao({
                 start: s.start, end: s.end, calendarId: s.calendarId,
                 titulo: `[TESTE] Reunião ChatClean — ${leadData.nome || 'Lead'}`, descricao: 'Simulação — evento de teste (será apagado).'
@@ -129,22 +124,22 @@ async function agendarSubfluxo(texto, extraido) {
             createdEvents.push({ eventId: ev.id, calendarId: s.calendarId });
             leadData.reuniaoAgendada = { label: ev.label };
             leadData.aguardandoEscolhaSlot = false; leadData.slotsOferecidos = null; leadData.finalizado = true;
-            return `Prontinho! Deixei sua reunião marcada para ${ev.label} com um especialista da ChatClean 😊`;
+            return ofertaDeHorarios.textoDaConfirmacao(s);
         }
         if (extraido?.recusouReuniao) { leadData.aguardandoEscolhaSlot = false; leadData.slotsOferecidos = null; }
         return null;
     }
     const deveAgendar = leadData.qualificacaoCompleta || extraido?.querAgendar;
     if (deveAgendar && !leadData.reuniaoAgendada) {
-        const slots = await cal.horariosLivres({ dias: 5, max: 3 });
+        const slots = ofertaDeHorarios.escolherDoisHorarios(await cal.horariosLivres({ dias: 5, max: 20 }));
         if (!slots.length) return null;
         leadData.slotsOferecidos = slots.map(s => ({ start: s.start, end: s.end, calendarId: s.calendarId, label: s.label }));
         leadData.aguardandoEscolhaSlot = true;
-        const lista = slots.map((s, i) => `${i + 1}) ${s.label}`).join('\n');
+        leadData.ofertaTexto = ofertaDeHorarios.textoDaOferta(slots);
         const intro = exp.aberto
-            ? 'Posso já deixar uma reunião marcada com um especialista. Tenho estes horários:'
-            : `Nosso time retorna ${exp.proximoExpediente}. Posso já deixar uma reunião marcada com um especialista. Tenho estes horários:`;
-        return `${intro}\n${lista}\nQual fica melhor pra você? (é só me dizer o número)`;
+            ? 'Consigo uma conversa rápida com um especialista.'
+            : `Nosso time retorna ${exp.proximoExpediente}, e já consigo deixar uma conversa marcada com um especialista.`;
+        return `${intro} ${leadData.ofertaTexto}`;
     }
     return null;
 }
