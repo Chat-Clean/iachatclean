@@ -82,6 +82,7 @@ Ordem: teste de caracterização de `ccPush` -> porta + fake -> adapter real -> 
 | Nada vigiava o BOT repetindo pergunta (so o cliente) | `nao-repete-pergunta` entrou na guarda e manda regerar |
 | A grade usava passo `duracao >= 60 ? duracao : 30` e oferecia horarios SOBREPOSTOS com reuniao de 40 min | Grade no dominio: 10h as 16:40, passo igual a duracao, sem fim de semana. `/diag` mostra a janela e se ha sobreposicao |
 | Falha do Google Calendar degradava em silencio: ninguem sabia que o agendamento nao aconteceu | A equipe e avisada. Documentado tambem que a tela de consentimento em "Teste" expira o refresh token a cada 7 dias |
+| Lead vindo de clique em anuncio chegava com `Url: ... title: <legenda> <fala> <legenda> Link: ...` e tipo video/imagem (o criativo). A IA respondia sobre a campanha ("Vi a peca...", "Recebemos o video") em vez de atender | O ACL recorta so a fala do cliente e trata como texto (`src/infrastructure/chatclean/acl/anuncio.js`), tentando repeticao exata, ancoras e frase pre-pronta, nessa ordem. Sem fala recortavel, vale "Ola! Vim pelo anuncio e quero saber mais." A fala e o link da campanha ficam em `leadData.origemAnuncio`, no resumo da equipe e no historico de leads qualificados, para metrificar o trafego |
 
 ## Dívidas conhecidas (não corrigir sem decisão do negócio)
 

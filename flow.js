@@ -161,6 +161,34 @@ function escolhaDeSlot(texto, extraido, nSlots) {
     return null;
 }
 
+// Intencao de reuniao NESTA mensagem: pedido explicito ou interesse em avancar.
+// A extracao marca "quero marcar com um especialista" como querFalarComHumano E
+// querAgendar; e isto que separa esse caso de "quero falar com uma pessoa".
+function pediuReuniaoAgora(extraido) {
+    return Boolean(extraido && (extraido.querAgendar || extraido.demonstrouInteresse));
+}
+
+// Quando oferecer a agenda do time. Antes so havia dois gatilhos, fim da
+// qualificacao ou pedido explicito: o lead que dizia "gostei, quero contratar"
+// seguia no questionario. O interesse fica guardado no lead. Recusou a
+// reuniao: so um pedido explicito volta a oferecer.
+function deveOferecerReuniao(leadData, extraido) {
+    if (leadData.reuniaoAgendada || leadData.aguardandoEscolhaSlot) return false;
+    if (extraido && extraido.querAgendar) return true;
+    if (leadData.qualificacaoCompleta) return true;
+    return Boolean(leadData.demonstrouInteresse && !leadData.recusouReuniao);
+}
+
+// A oferta vem so do interesse e o lead perguntou algo junto ("tenho interesse,
+// como faco pra contratar?"): a duvida e respondida primeiro e a agenda vai logo
+// depois, no mesmo turno. Com pedido explicito ou qualificacao completa a agenda
+// sai direto, como antes.
+function ofertaDepoisDaResposta(leadData, extraido) {
+    if (!deveOferecerReuniao(leadData, extraido)) return false;
+    if ((extraido && extraido.querAgendar) || leadData.qualificacaoCompleta) return false;
+    return Boolean(extraido && extraido.perguntou);
+}
+
 module.exports = {
     CAMPOS,
     CAMPOS_SO_CAPTURA,
@@ -174,5 +202,8 @@ module.exports = {
     aplicarCampos,
     detectarSegmento,
     inferirSegmentoDaEmpresa,
-    escolhaDeSlot
+    escolhaDeSlot,
+    pediuReuniaoAgora,
+    deveOferecerReuniao,
+    ofertaDepoisDaResposta
 };

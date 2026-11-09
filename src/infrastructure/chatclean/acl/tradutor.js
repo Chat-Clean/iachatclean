@@ -16,6 +16,7 @@
 const { normalizarPhone } = require('../../../shared/telefone');
 const MensagemRecebida = require('../../../domain/mensageria/MensagemRecebida');
 const { MOTIVOS, descartar } = require('../../../domain/mensageria/MotivoDeDescarte');
+const { extrairFalaDoCliente, ehMensagemDeAnuncio } = require('./anuncio');
 
 const MAX_DESEMBRULHOS = 6; // teto para não girar em payload malformado
 
@@ -112,6 +113,29 @@ function humanoAssumiu(body, msg, soPendentes) {
     return false;
 }
 
+// Mensagem de anúncio: só a fala do cliente segue para a IA. O tipo vira texto
+// porque a mídia é o criativo da campanha, não algo que o cliente enviou — era
+// isso que fazia a IA responder "recebemos o vídeo".
+function semRastreioDeAnuncio(campos) {
+    const quotedText = ehMensagemDeAnuncio(campos.quotedText) ? null : campos.quotedText;
+    const anuncio = extrairFalaDoCliente(campos.texto);
+    if (!anuncio) return MensagemRecebida.criar({ ...campos, quotedText });
+    return MensagemRecebida.criar({
+        ...campos,
+        texto: anuncio.texto,
+        tipo: 'text',
+        mediaBase64: null,
+        mediaUrl: null,
+        mediaMimetype: null,
+        quotedText: null,
+        anuncio: {
+            link: anuncio.link,
+            mensagem: anuncio.recortou ? anuncio.texto : null,
+            metodo: anuncio.metodo
+        }
+    });
+}
+
 /**
  * Traduz o payload da borda para MensagemRecebida.
  *
@@ -157,7 +181,7 @@ function traduzir(bruto, opcoes = {}) {
         const tk = obterTicket(body, msg);
         const contactId = msg.contactId || contato.id || tk.contactId || body.contactId || null;
 
-        return MensagemRecebida.criar({
+        return semRastreioDeAnuncio({
             chatId: phone,
             contactId: contactId ? Number(contactId) : null,
             msgId: msg.id ? String(msg.id) : msg.messageId ? String(msg.messageId) : null,
@@ -182,7 +206,7 @@ function traduzir(bruto, opcoes = {}) {
         const phone = normalizarPhone(body.number);
         if (!phone) return descartar(MOTIVOS.SEM_TELEFONE);
 
-        return MensagemRecebida.criar({
+        return semRastreioDeAnuncio({
             chatId: phone,
             contactId: body.contactId ? Number(body.contactId) : body.contact?.id ? Number(body.contact.id) : null,
             msgId: body.id ? String(body.id) : null,

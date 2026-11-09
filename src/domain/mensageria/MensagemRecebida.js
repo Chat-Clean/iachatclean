@@ -25,6 +25,9 @@ const TIPOS_CONHECIDOS = Object.freeze(['text', 'image', 'audio', 'ptt', 'docume
  * @param {string|null} campos.mediaMimetype
  * @param {string|null} campos.quotedText Mensagem citada, quando o cliente responde a uma anterior.
  * @param {string} campos.nomeContato
+ * @param {{ link: string|null, mensagem: string|null, metodo: string }|null} [campos.anuncio]
+ *   Origem de clique em anúncio: link da campanha e a mensagem pré-pronta do
+ *   cliente (null quando não deu para recortar). O rastreio já saiu do texto.
  */
 function criar(campos) {
     if (!campos || !campos.chatId) {
@@ -41,7 +44,8 @@ function criar(campos) {
         mediaUrl: campos.mediaUrl ?? null,
         mediaMimetype: campos.mediaMimetype ?? null,
         quotedText: campos.quotedText ?? null,
-        nomeContato: campos.nomeContato ?? ''
+        nomeContato: campos.nomeContato ?? '',
+        anuncio: campos.anuncio ? Object.freeze({ ...campos.anuncio }) : null
     });
 }
 
